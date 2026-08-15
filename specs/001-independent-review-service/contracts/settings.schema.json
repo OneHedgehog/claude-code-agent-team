@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/agents-coding-team/schemas/settings.schema.json",
+  "title": "Agent operating settings",
+  "description": "Version-controlled operating settings read from <target>/.agents/settings.json. The file is shared by every agent working on the target repository, each under its own top-level section (FR-050): this service validates the `reviewService` section strictly and ignores sibling sections belonging to other agents. Within that section, a missing or invalid REQUIRED setting stops the run (FR-028) and an unrecognized key stops the run (FR-050), while a missing OPTIONAL setting is filled from the documented `default` here and its effective value is reported with the run (FR-054).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["reviewService"],
+  "properties": {
+    "reviewService": {
+      "$ref": "#/$defs/reviewServiceSettings"
+    }
+  },
+  "$defs": {
+    "reviewServiceSettings": {
+      "title": "Independent review service settings",
+      "description": "This service's own section. Validated strictly: `additionalProperties: false` makes an unrecognized key an error that stops the run, because a silently ignored typo in a budget or a threshold is indistinguishable from a setting that was never applied (FR-050).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requiredReviewerRoles",
+        "blockingSeverityThreshold",
+        "maxReviewRounds",
+        "maxReviewableDiffSize",
+        "maxPullRequestSize",
+        "excludedPathPatterns",
+        "tokenBudget",
+        "reviewerTokenReserve",
+        "platformApiBudget",
+        "platformApiReserve",
+        "maxRateLimitWaitSeconds",
+        "maxQueueWaitSeconds",
+        "escalationChannel"
+      ],
+      "$comment": "Cross-field invariants are not expressible in JSON Schema and are enforced in code immediately after schema validation, with the same stop-the-run consequence: reviewerTokenReserve < tokenBudget; platformApiReserve < platformApiBudget; maxReviewableDiffSize > maxPullRequestSize (otherwise FR-043 could never fire).",
+      "properties": {
+        "requiredReviewerRoles": {
+          "description": "Roles whose approving verdict the merge gate requires (FR-021). Required.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["security", "implementation"] },
+          "default": ["security", "implementation"]
+        },
+        "blockingSeverityThreshold": {
+          "description": "Lowest severity that blocks merge (FR-013). Required.",
+          "enum": ["critical", "high", "medium", "low"],
+          "default": "high"
+        },
+        "maxReviewRounds": {
+          "description": "Maximum review rounds per pull request before the service stops and escalates (FR-020). Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        },
+        "maxReviewableDiffSize": {
+          "description": "Changed lines past which no review is attempted: the gate fails before any spend and the pull request must be split (FR-037). Required. Must exceed maxPullRequestSize.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 2000
+        },
+        "maxPullRequestSize": {
+          "description": "Principle X discipline cap in changed lines, measured over the diff with excludedPathPatterns and git-reported binary files removed. Exceeding it is a blocking finding that a stated justification in the pull request description clears (FR-043). Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 400
+        },
+        "excludedPathPatterns": {
+          "description": "Declared list of path patterns excluded from line-anchored findings and from the changed-line count (FR-053). This list is the ONLY configurable source of exclusions; the service additionally excludes whatever the version control system reports as binary, and MUST NOT infer exclusions from a generated-file heuristic. Build output is kept out of the repository by .gitignore and never reaches a diff. Required — an empty array is a valid, explicit declaration that nothing is excluded by path.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "default": [
+            "package-lock.json",
+            "**/*.lock",
+            "**/__snapshots__/**"
+          ]
+        },
+        "tokenBudget": {
+          "description": "Cumulative model-token total for this repository across every pull request, every review, and every agent (FR-031, FR-047). Required.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "reviewerTokenReserve": {
+          "description": "Share of tokenBudget drawable by review work alone, so other agents' spend cannot leave a pull request ungated (FR-047). Required. Must be less than tokenBudget.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "platformApiBudget": {
+          "description": "Content-creating platform requests per hour the service may consume. GitHub's secondary limit is 500/hour and 80/minute; set this at or below the former. Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 400
+        },
+        "platformApiReserve": {
+          "description": "Remaining-request threshold at which the service stops issuing calls, notifies a human, and waits for the documented reset (FR-040). Required. Must be less than platformApiBudget.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 50
+        },
+        "maxRateLimitWaitSeconds": {
+          "description": "Longest the service may wait for a rate-limit reset before failing the gate and escalating (FR-040). Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 3900
+        },
+        "maxQueueWaitSeconds": {
+          "description": "Longest a review may wait for a host concurrency slot before failing the gate and escalating (FR-041). Below this, the gate stays unreported. Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1800
+        },
+        "escalationChannel": {
+          "description": "Transport for escalation notifications. The reason is additionally stated on the pull request in every case; this channel is never substituted for that (FR-035). Required.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "assignee"],
+          "properties": {
+            "type": { "enum": ["github-issue"] },
+            "assignee": {
+              "description": "GitHub login of the human the escalation is assigned to.",
+              "type": "string",
+              "minLength": 1
+            },
+            "label": {
+              "description": "Optional. Filled from the default when absent.",
+              "type": "string",
+              "minLength": 1,
+              "default": "escalation"
+            }
+          }
+        },
+        "modelEffort": {
+          "description": "OPTIONAL (FR-054) — depth/cost trade-off passed to the model boundary. Absent, the documented default below is applied rather than stopping the run, and the effective value is reported with the run so that no behavior depends on a value nobody can see.",
+          "enum": ["low", "medium", "high", "xhigh", "max"],
+          "default": "high"
+        }
+      }
+    }
+  }
+}

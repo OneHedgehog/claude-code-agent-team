@@ -1,0 +1,21 @@
+{
+  "$schema": "../schemas/settings.schema.json",
+  "reviewService": {
+    "requiredReviewerRoles": ["security", "implementation"],
+    "blockingSeverityThreshold": "high",
+    "maxReviewRounds": 10,
+    "maxReviewableDiffSize": 2000,
+    "maxPullRequestSize": 400,
+    "excludedPathPatterns": ["package-lock.json", "**/*.lock", "**/__snapshots__/**"],
+    "tokenBudget": 20000000,
+    "reviewerTokenReserve": 5000000,
+    "platformApiBudget": 400,
+    "platformApiReserve": 50,
+    "maxRateLimitWaitSeconds": 3900,
+    "maxQueueWaitSeconds": 1800,
+    "escalationChannel": {
+      "type": "github-issue",
+      "assignee": "OneHedgehog"
+    }
+  }
+}

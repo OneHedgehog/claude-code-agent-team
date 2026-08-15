@@ -1,0 +1,36 @@
+# Build output. This file is why FR-053 needs no generated-file detector: build output never
+# reaches a diff, so the only exclusions the reviewer needs are things committed on purpose.
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Test and coverage output
+coverage/
+.vitest/
+
+# Secrets — never committed, never logged (Principle V). Model and platform credentials live in
+# the runner's local environment or the OS keychain.
+.env
+.env.*
+*.pem
+*.key
+
+# Local agent state: the budget ledger is a cache whose authority is the check-run outputs (R-010).
+.agents/state/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Claude Code local overrides. `.claude/` itself is tracked (shared skills and settings);
+# only the per-developer local layer is ignored.
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*

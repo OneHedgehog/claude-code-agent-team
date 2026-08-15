@@ -1,0 +1,46 @@
+{
+  "name": "agents-coding-team",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Independent review service: a GitHub App and workflow that reviews and gates every pull request in a named target repository.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "bin": {
+    "review-service": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "vitest run --project e2e",
+    "check": "npm run build && npm run lint && npm run format:check && npm run typecheck && npm run test:unit && npm run test:integration"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@octokit/app": "^16.1.4",
+    "@octokit/graphql": "^9.0.4",
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
+    "@octokit/rest": "^22.0.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "xstate": "^5.32.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.10.1",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/agents-coding-team/schemas/review-record.schema.json",
+  "title": "Structured review record",
+  "description": "One JSON-lines record emitted by the review service (FR-033). Every record carries the run identifier that ties it to one review of one pull request revision. Together with the pull request itself, these records make a review reconstructible without re-running it (FR-034).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "timestamp", "level", "event"],
+  "properties": {
+    "runId": {
+      "description": "Identifies one review of one pull request revision.",
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "level": { "enum": ["debug", "info", "warn", "error"] },
+    "event": {
+      "description": "What happened. State transitions carry the machine's state names so the run is replayable from records alone.",
+      "enum": [
+        "run.started",
+        "run.concluded",
+        "state.entered",
+        "settings.resolved",
+        "settings.invalid",
+        "settings.defaults_applied",
+        "prerequisites.verified",
+        "prerequisites.missing",
+        "identity.self_authored_refused",
+        "diff.empty",
+        "paths.excluded",
+        "progress.no_forward_progress",
+        "rounds.cap_exceeded",
+        "size.exceeds_reviewable",
+        "size.exceeds_pull_request_cap",
+        "budget.checked",
+        "budget.exhausted",
+        "budget.reported",
+        "platform.reserve_reached",
+        "platform.wait_started",
+        "platform.wait_ended",
+        "queue.wait_started",
+        "queue.wait_exceeded",
+        "role.started",
+        "role.verdict",
+        "role.verdict_missing",
+        "finding.posted",
+        "finding.resolved",
+        "finding.waiver_requested",
+        "roles.contradiction_recorded",
+        "roles.disagreement_escalated",
+        "gate.reported",
+        "escalation.notified",
+        "error.unhandled"
+      ]
+    },
+    "target": {
+      "description": "The target repository, resolved from the explicit parameter (FR-026).",
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$"
+    },
+    "pullRequest": { "type": "integer", "minimum": 1 },
+    "revision": {
+      "description": "Head SHA the run examined. Every verdict and finding is bound to it (FR-009).",
+      "type": "string"
+    },
+    "round": { "type": "integer", "minimum": 1 },
+    "state": {
+      "description": "Statechart state, present on state.entered records.",
+      "type": "string"
+    },
+    "role": { "enum": ["security", "implementation"] },
+    "verdict": { "enum": ["approve", "request-changes"] },
+    "prerequisites": {
+      "description": "Startup verification of the service's own preconditions (FR-051). Emitted before any model tokens are spent; a missing prerequisite fails the gate naming it and escalates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permissionsHeld", "gateRequiredByBranchProtection"],
+      "properties": {
+        "permissionsHeld": {
+          "description": "True when the installation holds every permission the work requires (FR-003).",
+          "type": "boolean"
+        },
+        "gateRequiredByBranchProtection": {
+          "description": "True when the check run's name appears in the base branch's required status checks (FR-025).",
+          "type": "boolean"
+        },
+        "baseBranch": { "type": "string" },
+        "missing": {
+          "description": "What was absent, named so a human can act on it (FR-024).",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "excludedPaths": {
+      "description": "Paths excluded from line-anchored findings and from the changed-line count: git-reported binary plus declared excludedPathPatterns, never inferred (FR-053). The count is additionally reported in the check-run output.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "paths"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "source": {
+          "description": "Per-path attribution, so an exclusion can always be traced to a declaration rather than a guess.",
+          "type": "array",
+          "items": { "enum": ["vcs-binary", "declared-pattern"] }
+        }
+      }
+    },
+    "effectiveOptionalSettings": {
+      "description": "Optional settings and the values actually applied, whether supplied or filled from the documented default, so that no behavior depends on a value nobody can see (FR-054).",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "blocking"],
+      "properties": {
+        "id": { "type": "string" },
+        "severity": { "enum": ["critical", "high", "medium", "low"] },
+        "blocking": { "type": "boolean" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "pullRequestLevel": {
+          "description": "True when the location was not addressable within the diff (FR-014).",
+          "type": "boolean"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conclusion"],
+      "properties": {
+        "conclusion": {
+          "description": "Never neutral, skipped, or cancelled (FR-023).",
+          "enum": ["success", "failure", "unreported"]
+        },
+        "reason": { "type": "string" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokensConsumed": { "type": "integer", "minimum": 0 },
+        "budgetRemaining": { "type": "integer" },
+        "platformRequestsUsed": { "type": "integer", "minimum": 0 },
+        "platformRequestsRemaining": { "type": "integer" }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "channelDelivered", "statedOnPullRequest"],
+      "properties": {
+        "reason": { "type": "string" },
+        "channelDelivered": { "type": "boolean" },
+        "statedOnPullRequest": {
+          "description": "Both must be true; the pull request statement never substitutes for the channel (FR-035).",
+          "type": "boolean"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+dist/
+node_modules/
+coverage/
+package-lock.json
+
+# Not this feature's source. Reformatting untouched files is a Principle X blocking finding, so
+# these are ignored rather than rewritten.
+.claude/
+.specify/
+.mcp.json
+CLAUDE.md
+specs/
+docs/
+
+# Published copies of the contract schemas (T008). Kept byte-identical to their originals under
+# specs/001-independent-review-service/contracts/, so that a drift check is a plain diff.
+schemas/
