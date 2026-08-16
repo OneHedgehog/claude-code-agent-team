@@ -289,7 +289,7 @@ approving verdict in every case.
 
 ### Tests (write first, observe failing)
 
-- [ ] T077 [P] [US5] Unit tests for prerequisite verification in `tests/unit/review/prerequisites.test.ts`: a missing installation permission fails naming it; the gate absent from the base branch's `required_status_checks.contexts` fails naming the branch protection; a `404` on the protection endpoint is the unprotected-branch failure rather than a retry; a `403` reports the missing `administration: read` first; every path spends zero model tokens and records no verdict (FR-003, FR-025, FR-051)
+- [X] T077 [P] [US5] Unit tests for prerequisite verification in `tests/unit/review/prerequisites.test.ts`: a missing installation permission fails naming it; the gate absent from the base branch's `required_status_checks.contexts` fails naming the branch protection; a `404` on the protection endpoint is the unprotected-branch failure rather than a retry; a `403` reports the missing `administration: read` first; every path spends zero model tokens and records no verdict (FR-003, FR-025, FR-051)
 - [X] T078 [P] [US5] Unit tests for the empty-diff refusal in `tests/unit/review/rules/empty-diff.test.ts`: an empty diff and a whitespace-only diff are both refused, no verdict is recorded for either role, zero tokens are spent, and the gate reason states there is nothing to review (FR-052)
 - [X] T079 [P] [US5] Unit tests for round history in `tests/unit/review/round-history.test.ts`: the baseline is the most recent **concluded** round read from the reviewing identity's check runs; unconcluded rounds are ignored entirely; an absent history makes the first round, which is never a failed round (FR-020, FR-046)
 - [X] T080 [P] [US5] Unit tests for forward-progress detection, including the unconcluded-round baseline rule and comparison by revision-and-reply rather than elapsed time, in `tests/unit/review/progress.test.ts` (FR-046)
@@ -307,8 +307,8 @@ approving verdict in every case.
 
 ### Implementation
 
-- [ ] T092 [P] [US5] Implement branch-protection reads and the is-the-gate-required assertion in `src/github/branch-protection.ts` (FR-025, FR-051)
-- [ ] T093 [US5] Implement startup prerequisite verification — permissions held and gate required, both before any spend, neither ever configured by the service — in `src/review/prerequisites.ts` (FR-003, FR-025, FR-051) — depends on T026, T092
+- [X] T092 [P] [US5] Implement branch-protection reads and the is-the-gate-required assertion in `src/github/branch-protection.ts` (FR-025, FR-051)
+- [X] T093 [US5] Implement startup prerequisite verification — permissions held and gate required, both before any spend, neither ever configured by the service — in `src/review/prerequisites.ts` (FR-003, FR-025, FR-051) — depends on T026, T092
 - [X] T094 [P] [US5] Implement the empty and whitespace-only diff refusal in `src/review/rules/empty-diff.ts` (FR-052)
 - [X] T095 [US5] Implement round-history reads — prior rounds' `roundNumber`, `headSha`, `concluded`, open blocking fingerprints and conclusion time, from the reviewing identity's check runs — in `src/review/round-history.ts` (FR-020, FR-046) — depends on T038
 - [X] T096 [US5] Implement forward-progress and round-cap checks in `src/review/progress.ts` (FR-020, FR-046) — depends on T095

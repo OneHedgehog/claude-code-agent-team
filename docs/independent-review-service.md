@@ -10,9 +10,10 @@ That document records what was intended when it was written and is never rewritt
 what is true now.
 
 > **Status: not yet operational.** The code below is built and tested, but the service cannot run
-> against a real pull request until the [human prerequisites](#human-prerequisites) are met, and the
-> merge gate itself is [blocked on a plan limitation](#the-merge-gate-is-blocked). Both are described
-> honestly rather than hidden behind a green test suite.
+> against a real pull request until the [human prerequisites](#human-prerequisites) are met — the
+> GitHub App, the fixture repository, and the runner. The [merge gate](#the-merge-gate) is
+> implemented and no longer blocked, but `main` is unprotected, so the gate is not yet required by
+> anything.
 
 ## What it does
 
@@ -184,41 +185,41 @@ None of these can be done by the service. An identity that can provision its own
 | **Private fixture repository** | Every end-to-end test | Cannot be the target repository: one scenario needs a branch where the gate is deliberately *not* required |
 | **Self-hosted runner** registered, job-slot count set to the host-wide concurrency cap | Every end-to-end test, and real operation | Reviewer jobs take an ordinary slot |
 | **`ANTHROPIC_API_KEY`** in the runner's local environment or keychain | Production runs | Never in Actions secrets — that would put the model credential inside the blast radius of the pull requests it reviews |
-| **Branch protection** requiring the check on the default branch | Real operation | See below |
+| **Branch protection** requiring `independent-review` on the default branch | Real operation | Available now the repository is public; `main` is still unprotected. See [the merge gate](#the-merge-gate) |
 
-## The merge gate is blocked
+## The merge gate
 
-The target repository is **private on GitHub Free**, which offers neither branch protection nor
-rulesets. Both endpoints return `403 Upgrade to GitHub Pro or make this repository public to enable
-this feature.`
+[`github/branch-protection.ts`](../src/github/branch-protection.ts) reads the base branch's
+protection and [`review/prerequisites.ts`](../src/review/prerequisites.ts) asserts that the
+`independent-review` check appears in its required status checks — both before any model tokens are
+spent. The service **verifies and never configures**: configuring would need `administration:
+write`, and an identity that can write branch protection can remove its own gate.
 
-The service verifies that its check run is a *required* check before every review, and treats a
-missing required check as `failure` + escalate + zero spend. Built as specified against this
-repository today, it would refuse to review anything, permanently. So
-[`github/branch-protection.ts`](../src/github/) and the prerequisite check that consumes it are
-**not implemented**, and the statechart's `gateNotRequiredByBranchProtection` guard has no producer
-yet.
+`main` is currently **unprotected**, so the endpoint returns `404 Branch not protected` and the
+service fails its own prerequisite check with a reason naming the branch. Making the gate real is a
+human step: add `independent-review` to the branch's required status checks.
 
-Resolving it needs one of: making the repository public, upgrading to GitHub Pro, or moving it to an
-organization on Team or above.
+Four responses, four meanings — and two of them share a status code:
 
-Note that a `403` here has two causes that must never be collapsed:
+| Response | Means | Reported as |
+|---|---|---|
+| `200` | Protected; read `required_status_checks.contexts` | Pass if the gate is listed |
+| `404` | The branch is unprotected | The failure case — never an error to retry |
+| `403` `Resource not accessible by …` | The grant really is missing | Missing `administration: read` |
+| `403` `Upgrade to GitHub Pro or make this repository public…` | The plan does not offer the feature; the grant may well be held | A plan limitation, explicitly **not** a permission fault |
 
-| Message | Means |
-|---|---|
-| `Resource not accessible by personal access token` | The grant really is missing |
-| `Upgrade to GitHub Pro or make this repository public…` | The plan does not offer the feature; the grant may well be held |
-
-Verified against this repository: the token **holds** `administration: read` — `/keys`, `/autolinks`,
-`/actions/permissions` and `/actions/runners` all return `200` — and still gets `403` on
-`/branches/main/protection`. Reporting the second case as a missing permission sends an operator
-hunting a grant they already have.
+That last distinction was verified against this repository while it was private on GitHub Free: the
+token **held** `administration: read` — `/keys`, `/autolinks`, `/actions/permissions` and
+`/actions/runners` all returned `200` — and still got `403` on `/branches/main/protection`.
+Reporting it as a missing permission sends an operator hunting a grant they already have. The
+repository is public now, so this path no longer fires here, but it remains correct for any private
+target.
 
 ## Test layers
 
 | Layer | Model | Gates merge | Status |
 |---|---|---|---|
-| Unit | Not invoked | Yes | 503 tests passing |
+| Unit | Not invoked | Yes | 546 tests passing |
 | Integration | Not invoked | Yes | 52 tests passing |
 | End-to-end | Scripted double | Yes | **Not yet runnable** — needs the App and fixture repository |
 
