@@ -114,6 +114,9 @@ export interface LoggerOptions {
 
 const REDACTED = "[REDACTED]";
 
+/** The four fields every record carries by construction; a caller may not displace them. */
+const RESERVED_RECORD_KEYS: ReadonlySet<string> = new Set(["runId", "timestamp", "level", "event"]);
+
 /**
  * Value shapes that are credentials wherever they appear. Ordered longest-match-first so a PEM
  * block is replaced whole rather than leaving fragments behind.
@@ -190,12 +193,22 @@ export function createLogger(options: LoggerOptions): Logger {
     });
 
   const emit = (level: Level, event: ReviewEvent, fields: RecordFields = {}): void => {
+    const scrubbed = redact(fields) as Record<string, unknown>;
+
+    // The four identity fields win over anything a caller passes. Spreading the caller's fields
+    // last would let a stray `runId` detach a record from its run, which is the one thing FR-033
+    // asks these records to guarantee. Filtering rather than reordering keeps `runId` first in the
+    // serialized line, where a human scanning JSONL expects it.
+    const safe = Object.fromEntries(
+      Object.entries(scrubbed).filter(([key]) => !RESERVED_RECORD_KEYS.has(key)),
+    );
+
     const record = {
       runId,
       timestamp: now().toISOString(),
       level,
       event,
-      ...(redact(fields) as Record<string, unknown>),
+      ...safe,
     };
 
     write(JSON.stringify(record));

@@ -2,6 +2,7 @@ import type { RoleName } from "../config/settings.js";
 import type { TargetRepository } from "../config/target.js";
 import { isPullRequestLevel } from "../model/client.js";
 import { renderMarker, type Finding } from "../review/findings.js";
+import { redact } from "../observability/logger.js";
 
 /**
  * Submitting a role's verdict as a pull request review (FR-006, research.md R-006).
@@ -51,10 +52,16 @@ function toEvent(decision: "approve" | "request-changes"): "APPROVE" | "REQUEST_
 export function renderFinding(finding: Finding): string {
   const status = finding.blocking ? "blocking" : "non-blocking";
 
+  // The description is model-authored text about code that may itself contain a credential — a
+  // hardcoded-secret finding is the likeliest place for one to be quoted back. Redacting here
+  // keeps FR-032 true on the comment surface: the finding still says what is wrong and where,
+  // without republishing the secret to a pull request that may be public.
+  const description = redact(finding.description) as string;
+
   return [
     `**${finding.severity}** · ${status} · \`${finding.rule}\``,
     "",
-    finding.description,
+    description,
     "",
     renderMarker(finding),
   ].join("\n");

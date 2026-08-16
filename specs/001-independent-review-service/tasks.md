@@ -258,18 +258,18 @@ success and a fresh review runs; then fix one finding, leave one standing, and a
 
 ### Tests (write first, observe failing)
 
-- [ ] T068 [P] [US4] Unit tests for reconciliation in `tests/unit/review/reconcile.test.ts` — resolve fixed, leave standing open without reposting, add new; and the FR-015 limits: a finding that still stands is **never** resolved, a finding authored by anyone else is **never** resolved, and nothing is resolved merely for being old (FR-015, FR-039)
-- [ ] T069 [P] [US4] Unit tests for reply judgement and waiver-request creation — rejected justification leaves the finding blocking, accepted justification records a waiver rather than a fix and is never resolved by reconciliation — in `tests/unit/review/replies.test.ts` (FR-044, FR-045)
+- [X] T068 [P] [US4] Unit tests for reconciliation in `tests/unit/review/reconcile.test.ts` — resolve fixed, leave standing open without reposting, add new; and the FR-015 limits: a finding that still stands is **never** resolved, a finding authored by anyone else is **never** resolved, and nothing is resolved merely for being old (FR-015, FR-039)
+- [X] T069 [P] [US4] Unit tests for reply judgement and waiver-request creation — rejected justification leaves the finding blocking, accepted justification records a waiver rather than a fix and is never resolved by reconciliation — in `tests/unit/review/replies.test.ts` (FR-044, FR-045)
 - [ ] T070 [US4] E2E test: a push after approval leaves the gate no longer reporting success and triggers a fresh full-diff review, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 7 (FR-017, FR-018, SC-005)
 - [ ] T071 [US4] E2E test: re-review resolves the fixed finding, leaves the standing one open unreposted, adds the new one, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 8 (FR-039, SC-015)
 - [ ] T072 [US4] E2E test: rejected justification keeps the finding blocking; accepted justification records a waiver request, escalates, and does not resolve or pass, in `tests/e2e/waivers.e2e.ts` — quickstart scenarios 9 and 10 (FR-044, FR-045, SC-019)
 
 ### Implementation
 
-- [ ] T073 [P] [US4] Implement review-thread reads and `resolveReviewThread` via GraphQL, restricted to threads carrying the service's own findings, in `src/github/threads.ts` (FR-015, FR-039, FR-044)
-- [ ] T074 [US4] Implement finding reconciliation against the current revision, resolving only the service's own findings the revision no longer exhibits, in `src/review/reconcile.ts` (FR-015, FR-039) — depends on T051, T073
-- [ ] T075 [US4] Implement reply judgement, waiver requests, and the gate hold in `src/review/replies.ts` (FR-044, FR-045) — depends on T074
-- [ ] T076 [US4] Wire the `reconciling` state and the superseded-run discard into `src/review/machine.ts` (FR-017, FR-019) — depends on T074
+- [X] T073 [P] [US4] Implement review-thread reads and `resolveReviewThread` via GraphQL, restricted to threads carrying the service's own findings, in `src/github/threads.ts` (FR-015, FR-039, FR-044)
+- [X] T074 [US4] Implement finding reconciliation against the current revision, resolving only the service's own findings the revision no longer exhibits, in `src/review/reconcile.ts` (FR-015, FR-039) — depends on T051, T073
+- [X] T075 [US4] Implement reply judgement, waiver requests, and the gate hold in `src/review/replies.ts` (FR-044, FR-045) — depends on T074
+- [X] T076 [US4] Wire the `reconciling` state and the superseded-run discard into `src/review/machine.ts` (FR-017, FR-019) — depends on T074
 
 **Footprints**: T070 and T071 share `tests/e2e/staleness.e2e.ts` and MUST be serialized. T076 writes
 `src/review/machine.ts` — serialize against T030 and T045.
@@ -290,12 +290,12 @@ approving verdict in every case.
 ### Tests (write first, observe failing)
 
 - [ ] T077 [P] [US5] Unit tests for prerequisite verification in `tests/unit/review/prerequisites.test.ts`: a missing installation permission fails naming it; the gate absent from the base branch's `required_status_checks.contexts` fails naming the branch protection; a `404` on the protection endpoint is the unprotected-branch failure rather than a retry; a `403` reports the missing `administration: read` first; every path spends zero model tokens and records no verdict (FR-003, FR-025, FR-051)
-- [ ] T078 [P] [US5] Unit tests for the empty-diff refusal in `tests/unit/review/rules/empty-diff.test.ts`: an empty diff and a whitespace-only diff are both refused, no verdict is recorded for either role, zero tokens are spent, and the gate reason states there is nothing to review (FR-052)
-- [ ] T079 [P] [US5] Unit tests for round history in `tests/unit/review/round-history.test.ts`: the baseline is the most recent **concluded** round read from the reviewing identity's check runs; unconcluded rounds are ignored entirely; an absent history makes the first round, which is never a failed round (FR-020, FR-046)
-- [ ] T080 [P] [US5] Unit tests for forward-progress detection, including the unconcluded-round baseline rule and comparison by revision-and-reply rather than elapsed time, in `tests/unit/review/progress.test.ts` (FR-046)
-- [ ] T081 [P] [US5] Unit tests for the reviewable-size gate spending nothing in `tests/unit/review/rules/reviewable-size.test.ts` (FR-037)
-- [ ] T082 [P] [US5] Unit tests asserting no code path yields `neutral`, `skipped`, or `cancelled`, and that every `failure` carries a reason, in `tests/unit/review/gate-conclusions.test.ts` (FR-023, FR-024)
-- [ ] T083 [P] [US5] Unit tests for escalation in `tests/unit/observability/escalate.test.ts`: every escalation both notifies through the configured channel **and** states its reason on the pull request, neither substituted for the other, and a recurring cause on the same pull request updates its issue rather than duplicating it (FR-035, R-012)
+- [X] T078 [P] [US5] Unit tests for the empty-diff refusal in `tests/unit/review/rules/empty-diff.test.ts`: an empty diff and a whitespace-only diff are both refused, no verdict is recorded for either role, zero tokens are spent, and the gate reason states there is nothing to review (FR-052)
+- [X] T079 [P] [US5] Unit tests for round history in `tests/unit/review/round-history.test.ts`: the baseline is the most recent **concluded** round read from the reviewing identity's check runs; unconcluded rounds are ignored entirely; an absent history makes the first round, which is never a failed round (FR-020, FR-046)
+- [X] T080 [P] [US5] Unit tests for forward-progress detection, including the unconcluded-round baseline rule and comparison by revision-and-reply rather than elapsed time, in `tests/unit/review/progress.test.ts` (FR-046)
+- [X] T081 [P] [US5] Unit tests for the reviewable-size gate spending nothing in `tests/unit/review/rules/reviewable-size.test.ts` (FR-037)
+- [X] T082 [P] [US5] Unit tests asserting no code path yields `neutral`, `skipped`, or `cancelled`, and that every `failure` carries a reason, in `tests/unit/review/gate-conclusions.test.ts` (FR-023, FR-024)
+- [X] T083 [P] [US5] Unit tests for escalation in `tests/unit/observability/escalate.test.ts`: every escalation both notifies through the configured channel **and** states its reason on the pull request, neither substituted for the other, and a recurring cause on the same pull request updates its issue rather than duplicating it (FR-035, R-012)
 - [ ] T084 [US5] E2E test: the merge gate absent from the base branch's required checks, and separately a missing installation permission — each spends zero tokens, records no verdict, fails the gate naming the missing prerequisite, and escalates, in `tests/e2e/prerequisites.e2e.ts` — quickstart scenario 26 (FR-051, SC-024)
 - [ ] T085 [US5] E2E test: a pull request whose diff is empty or whitespace-only is refused — zero spend, no verdict, gate `failure` stating there is nothing to review, escalation — in `tests/e2e/empty-diff.e2e.ts` — quickstart scenario 27 (FR-052)
 - [ ] T086 [US5] E2E test: missing model credentials and mid-run error each fail the gate with a reason and zero approving verdicts, in `tests/e2e/fail-closed.e2e.ts` — quickstart scenario 13 (FR-023, SC-002)
@@ -309,14 +309,14 @@ approving verdict in every case.
 
 - [ ] T092 [P] [US5] Implement branch-protection reads and the is-the-gate-required assertion in `src/github/branch-protection.ts` (FR-025, FR-051)
 - [ ] T093 [US5] Implement startup prerequisite verification — permissions held and gate required, both before any spend, neither ever configured by the service — in `src/review/prerequisites.ts` (FR-003, FR-025, FR-051) — depends on T026, T092
-- [ ] T094 [P] [US5] Implement the empty and whitespace-only diff refusal in `src/review/rules/empty-diff.ts` (FR-052)
-- [ ] T095 [US5] Implement round-history reads — prior rounds' `roundNumber`, `headSha`, `concluded`, open blocking fingerprints and conclusion time, from the reviewing identity's check runs — in `src/review/round-history.ts` (FR-020, FR-046) — depends on T038
-- [ ] T096 [US5] Implement forward-progress and round-cap checks in `src/review/progress.ts` (FR-020, FR-046) — depends on T095
-- [ ] T097 [US5] Implement the `maxReviewableDiffSize` pre-spend gate, measured over the excluded set, in `src/review/rules/reviewable-size.ts` (FR-037) — depends on T063
-- [ ] T098 [P] [US5] Implement queue-wait measurement and the escalation threshold in `src/review/queue.ts` (FR-041)
-- [ ] T099 [US5] Implement escalation — the `NotificationChannel` interface, its GitHub-issue implementation, and the statement on the pull request that always accompanies it, neither substituted for the other — in `src/observability/escalate.ts` (FR-035) — depends on T026
-- [ ] T100 [US5] Wire `checkingPrerequisites`, the empty-diff exit, fail-closed exits, `waitingForReset`, and `escalating` into `src/review/machine.ts` (FR-023, FR-051, FR-052) — depends on T093, T094, T096, T097, T098, T099
-- [ ] T101 [US5] Create the reviewer workflow with the per-pull-request concurrency group and `cancel-in-progress: true` in `.github/workflows/review.yml` (FR-001, FR-019, FR-041)
+- [X] T094 [P] [US5] Implement the empty and whitespace-only diff refusal in `src/review/rules/empty-diff.ts` (FR-052)
+- [X] T095 [US5] Implement round-history reads — prior rounds' `roundNumber`, `headSha`, `concluded`, open blocking fingerprints and conclusion time, from the reviewing identity's check runs — in `src/review/round-history.ts` (FR-020, FR-046) — depends on T038
+- [X] T096 [US5] Implement forward-progress and round-cap checks in `src/review/progress.ts` (FR-020, FR-046) — depends on T095
+- [X] T097 [US5] Implement the `maxReviewableDiffSize` pre-spend gate, measured over the excluded set, in `src/review/rules/reviewable-size.ts` (FR-037) — depends on T063
+- [X] T098 [P] [US5] Implement queue-wait measurement and the escalation threshold in `src/review/queue.ts` (FR-041)
+- [X] T099 [US5] Implement escalation — the `NotificationChannel` interface, its GitHub-issue implementation, and the statement on the pull request that always accompanies it, neither substituted for the other — in `src/observability/escalate.ts` (FR-035) — depends on T026
+- [X] T100 [US5] Wire `checkingPrerequisites`, the empty-diff exit, fail-closed exits, `waitingForReset`, and `escalating` into `src/review/machine.ts` (FR-023, FR-051, FR-052) — depends on T093, T094, T096, T097, T098, T099
+- [X] T101 [US5] Create the reviewer workflow with the per-pull-request concurrency group and `cancel-in-progress: true` in `.github/workflows/review.yml` (FR-001, FR-019, FR-041)
 
 **Footprints**: T086 and T088 share `tests/e2e/fail-closed.e2e.ts` and MUST be serialized. T100 writes
 `src/review/machine.ts` — serialize against T030, T045, T076. T097 depends on T063 from Phase 5 — the
@@ -337,13 +337,13 @@ verdict and a non-passing gate.
 
 ### Tests (write first, observe failing)
 
-- [ ] T102 [P] [US6] Unit tests for author-versus-reviewing-identity comparison, including the negative case where another author does not trip the check, in `tests/unit/review/self-review.test.ts` (FR-004)
+- [X] T102 [P] [US6] Unit tests for author-versus-reviewing-identity comparison, including the negative case where another author does not trip the check, in `tests/unit/review/self-review.test.ts` (FR-004)
 - [ ] T103 [US6] E2E test: self-authored pull request records no approval, states the reason, escalates; another author does not trip the check, in `tests/e2e/self-review.e2e.ts` — quickstart scenario 18 (FR-004, SC-006)
 
 ### Implementation
 
-- [ ] T104 [US6] Implement the self-authored refusal check in `src/review/self-review.ts` (FR-004)
-- [ ] T105 [US6] Wire `checkingIdentity` into `src/review/machine.ts` (FR-004) — depends on T104
+- [X] T104 [US6] Implement the self-authored refusal check in `src/review/self-review.ts` (FR-004)
+- [X] T105 [US6] Wire `checkingIdentity` into `src/review/machine.ts` (FR-004) — depends on T104
 
 **Footprints**: T105 writes `src/review/machine.ts` — serialize against every other machine task.
 
@@ -362,16 +362,16 @@ report.
 
 ### Tests (write first, observe failing)
 
-- [ ] T106 [P] [US7] Unit tests asserting every emitted record validates against `schemas/review-record.schema.json` and carries `runId`, with no bare prose on standard output, in `tests/unit/observability/records.test.ts` (FR-033, FR-034)
-- [ ] T107 [P] [US7] Unit tests for the check-run output payload in `tests/unit/github/check-run-output.test.ts`: tokens consumed, budget remaining, the excluded-path count, the effective value of every optional setting, and the round-history fields the next round reads are all present (FR-031, FR-046, FR-053, FR-054)
+- [X] T106 [P] [US7] Unit tests asserting every emitted record validates against `schemas/review-record.schema.json` and carries `runId`, with no bare prose on standard output, in `tests/unit/observability/records.test.ts` (FR-033, FR-034)
+- [X] T107 [P] [US7] Unit tests for the check-run output payload in `tests/unit/github/check-run-output.test.ts`: tokens consumed, budget remaining, the excluded-path count, the effective value of every optional setting, and the round-history fields the next round reads are all present (FR-031, FR-046, FR-053, FR-054)
 - [ ] T108 [US7] E2E test: run from an unrelated working directory resolves constitution, settings, and inspected paths through `--target`; a missing `--target` stops with an error, in `tests/e2e/addressing.e2e.ts` — quickstart scenario 23 (FR-026, FR-027, SC-012)
 - [ ] T109 [US7] E2E test: a settings file carrying a sibling agent's section, an unknown key inside `reviewService`, and no `modelEffort` — the sibling is ignored, the unknown own key stops the run, and the documented default is applied with its effective value reported, in `tests/e2e/settings.e2e.ts` — quickstart scenario 28 (FR-050, FR-054)
 - [ ] T110 [US7] E2E test: a concluded run reports tokens consumed and budget remaining, and is reconstructible from its records and the pull request alone, in `tests/e2e/accountability.e2e.ts` — quickstart scenario 22 (FR-033, FR-034, SC-008)
 
 ### Implementation
 
-- [ ] T111 [US7] Extend the check-run output in `src/github/check-run.ts` to carry per-run spend and budget remaining, the excluded-path count, the effective optional settings, and the round-history fields the next round reads (FR-031, FR-046, FR-053, FR-054) — shares the file with T038 and T095, serialize against Phases 3 and 7
-- [ ] T112 [US7] Thread the run identifier through every emission path in `src/observability/logger.ts` and `src/review/machine.ts` (FR-033) — depends on T021, T030
+- [X] T111 [US7] Extend the check-run output in `src/github/check-run.ts` to carry per-run spend and budget remaining, the excluded-path count, the effective optional settings, and the round-history fields the next round reads (FR-031, FR-046, FR-053, FR-054) — shares the file with T038 and T095, serialize against Phases 3 and 7
+- [X] T112 [US7] Thread the run identifier through every emission path in `src/observability/logger.ts` and `src/review/machine.ts` (FR-033) — depends on T021, T030
 
 **Footprints**: T111 writes `src/github/check-run.ts`, shared with T038 — serialize against Phase 3.
 T112 writes two files shared with earlier phases — runs alone.
@@ -382,12 +382,12 @@ T112 writes two files shared with earlier phases — runs alone.
 
 ## Phase 10: Polish & Cross-Cutting Concerns
 
-- [ ] T113 Generate the statechart diagram from `src/review/machine.ts` into `docs/independent-review-service.md` via a script in `scripts/generate-diagram.ts`, wired into `check` so the diagram cannot drift (Principle VII)
-- [ ] T114 Write the feature document — what it does, how it works, how to run it, decisions and trade-offs, including both recorded least-privilege tensions and the human prerequisites above — in `docs/independent-review-service.md` (Principle IX) — depends on T113
-- [ ] T115 [P] Add the lint rule failing any assertion on model-produced strings under `tests/e2e/` in `eslint.config.js` (FR-030, SC-010)
+- [X] T113 Generate the statechart diagram from `src/review/machine.ts` into `docs/independent-review-service.md` via a script in `scripts/generate-diagram.ts`, wired into `check` so the diagram cannot drift (Principle VII)
+- [X] T114 Write the feature document — what it does, how it works, how to run it, decisions and trade-offs, including both recorded least-privilege tensions and the human prerequisites above — in `docs/independent-review-service.md` (Principle IX) — depends on T113
+- [X] T115 [P] Add the lint rule failing any assertion on model-produced strings under `tests/e2e/` in `eslint.config.js` (FR-030, SC-010)
 - [ ] T116 Add the timed e2e case asserting a 1,000-changed-line diff concludes within 10 minutes in `tests/e2e/performance.e2e.ts`, stating in the test that the model boundary is substituted so the figure bounds harness overhead rather than model latency; the real-model figure is an eval outside the merge path (SC-013, Principle II)
-- [ ] T117 [P] Add prompt-injection regression tests — diff, comment, and model-output content carrying instructions is never acted on — in `tests/unit/model/injection.test.ts` (FR-036)
-- [ ] T118 [P] Add a credential-leak regression test asserting no record, comment, or prompt contains credential-shaped values in `tests/unit/observability/redaction.test.ts` (FR-032)
+- [X] T117 [P] Add prompt-injection regression tests — diff, comment, and model-output content carrying instructions is never acted on — in `tests/unit/model/injection.test.ts` (FR-036)
+- [X] T118 [P] Add a credential-leak regression test asserting no record, comment, or prompt contains credential-shaped values in `tests/unit/observability/redaction.test.ts` (FR-032)
 - [ ] T119 Run all 29 quickstart validation scenarios against the fixture repository and record the results in `docs/independent-review-service.md` — the `specs/` record states intent at the time it was written and is not rewritten (Principle IX)
 - [ ] T120 Write the pull request description: the irreducibility justification for its size per Principle X and [plan.md](plan.md) Complexity Tracking, the spec and run identifier links (Principle VII), and — if `.mcp.json` is tracked — why agent tooling configuration rides along, since it traces to no spec and sits on the escalation list (FR-043, Principle V, Principle X)
 - [ ] T121 E2E test: every escalation path emits a notification through the configured channel **and** states its reason on the pull request, with neither substituted for the other, in `tests/e2e/escalation.e2e.ts` — quickstart scenario 21 (FR-035, SC-011, SC-021)

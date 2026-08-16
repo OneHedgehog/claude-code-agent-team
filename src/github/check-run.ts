@@ -1,5 +1,6 @@
 import type { TargetRepository } from "../config/target.js";
 import type { GateResult } from "../review/gate.js";
+import { renderRoundRecord, type RoundRecord } from "../review/round-history.js";
 
 /**
  * The merge gate itself: a check run created and updated by the App installation (FR-021, FR-022,
@@ -89,6 +90,49 @@ export function toConclusion(result: GateResult): ReportableConclusion | null {
   }
 
   return result.conclusion;
+}
+
+export interface GateOutputInput {
+  readonly result: GateResult;
+  /** This round's record, which the next round reads back as its baseline (FR-020, FR-046). */
+  readonly round: RoundRecord;
+  /** Optional settings and the values actually applied (FR-054). */
+  readonly effectiveOptionalSettings: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The check-run output, which is where this run's state lives so the next one can rebuild it from
+ * GitHub alone (Principle VII). It carries four things no other surface does: the round history
+ * FR-046 compares against, the spend FR-038 reconstructs the ledger from, the excluded-path count
+ * FR-053 requires be reported, and the effective optional settings FR-054 requires be visible —
+ * because behavior that depends on a value nobody can see is behavior nobody can audit.
+ */
+export function buildGateOutput(input: GateOutputInput): CheckRunOutput {
+  const { result, round, effectiveOptionalSettings } = input;
+
+  const passed = result.conclusion === "success";
+
+  const settingsLine = Object.entries(effectiveOptionalSettings)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(", ");
+
+  const summary = [
+    passed
+      ? "Every required reviewer role approved this revision."
+      : (result.reason ?? "The gate did not pass."),
+    "",
+    `Round ${round.roundNumber} · revision ${round.headSha}`,
+    `Tokens consumed: ${round.tokensConsumed} · budget remaining: ${round.budgetRemaining}`,
+    `Excluded paths: ${round.excludedPathCount} path(s) removed from anchoring and from the changed-line count`,
+    `Effective optional settings: ${settingsLine === "" ? "none" : settingsLine}`,
+  ].join("\n");
+
+  return {
+    title: passed ? "Independent review passed" : "Independent review failed",
+    summary,
+    // The machine-readable half. `round-history.ts` reads exactly this back.
+    text: renderRoundRecord(round),
+  };
 }
 
 export interface OpenGate {

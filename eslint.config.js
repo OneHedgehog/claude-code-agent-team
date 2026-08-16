@@ -3,10 +3,12 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 import { justifiedAny } from "./eslint-rules/justified-any.js";
+import { noGeneratedContentAssertions } from "./eslint-rules/no-generated-content-assertions.js";
 
 const local = {
   rules: {
     "justified-any": justifiedAny,
+    "no-generated-content-assertions": noGeneratedContentAssertions,
   },
 };
 
@@ -62,6 +64,21 @@ export default tseslint.config(
   // The logger is the one place a record reaches stdout (research.md R-014).
   {
     files: ["src/observability/logger.ts"],
+    rules: { "no-console": "off" },
+  },
+
+  // Principle II, FR-030, SC-010: end-to-end tests assert on the deterministic surface only. An
+  // assertion on generated wording breaks when the model rephrases rather than when the behavior
+  // changes, and a suite that goes red for no behavioral reason gets deleted.
+  {
+    files: ["tests/e2e/**/*.ts"],
+    rules: { "local/no-generated-content-assertions": "error" },
+  },
+
+  // The diagram generator runs against the build output, and reports through stderr/stdout because
+  // it is a build tool rather than a run of the service.
+  {
+    files: ["scripts/*.ts"],
     rules: { "no-console": "off" },
   },
 

@@ -17,10 +17,12 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "diagram": "node --experimental-strip-types scripts/generate-diagram.ts",
+    "diagram:check": "node --experimental-strip-types scripts/generate-diagram.ts --check",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:e2e": "vitest run --project e2e",
-    "check": "npm run build && npm run lint && npm run format:check && npm run typecheck && npm run test:unit && npm run test:integration"
+    "check": "npm run build && npm run lint && npm run format:check && npm run typecheck && npm run diagram:check && npm run test:unit && npm run test:integration"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
@@ -30,7 +32,6 @@
     "@octokit/plugin-throttling": "^11.0.5",
     "@octokit/rest": "^22.0.1",
     "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1",
     "xstate": "^5.32.5"
   },
   "devDependencies": {
