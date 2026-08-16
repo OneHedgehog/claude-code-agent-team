@@ -158,6 +158,19 @@ crash from being mistaken for an author who pushed nothing.
 **The service verifies branch protection; it never configures it.** An identity that can write branch
 protection can remove its own gate.
 
+**A fork's pull request never reaches the self-hosted runner.** The reviewer job checks out the pull
+request's own code and builds it, so on a public repository an unguarded workflow would hand any
+stranger arbitrary code execution on the runner host. `review.yml` is gated on
+`github.event.pull_request.head.repo.full_name == github.repository`, and the repository's fork
+pull-request approval policy is set to `all_external_contributors` as defence in depth — approval is
+a human clicking a button, and the guard is what cannot be misclicked.
+
+The consequence is deliberate: a fork's pull request gets no review, so the gate is never reported
+and branch protection keeps it un-mergeable. That is the same "un-mergeable and quiet beats
+mergeable" boundary R-013 records for a review that never starts. A fork contributor's change
+reaches `main` by a maintainer taking it onto a branch in this repository, where it is reviewed like
+anything else.
+
 ### Two least-privilege tensions, recorded rather than hidden
 
 - **`contents: write`** — resolving a review thread is available only through the GraphQL

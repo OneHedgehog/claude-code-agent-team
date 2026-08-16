@@ -35,6 +35,23 @@ permissions:
 
 jobs:
   review:
+    # A fork's pull request MUST NOT reach the self-hosted runner. This job checks out the pull
+    # request's own code and runs `npm ci` and `npm run build` against it, so on a public repository
+    # without this guard any stranger opening a pull request would get arbitrary code execution on
+    # the runner host. GitHub's own guidance is that self-hosted runners belong to private
+    # repositories; this condition is what makes them safe on a public one.
+    #
+    # The repository's fork-pull-request approval policy is set to `all_external_contributors`,
+    # which is defence in depth rather than the control — approval is a human clicking a button,
+    # and one misclick would be enough. This guard cannot be misclicked.
+    #
+    # Consequence, and it is the correct one: a fork's pull request gets no review, so the gate is
+    # never reported and branch protection keeps the pull request un-mergeable. Un-mergeable and
+    # quiet beats mergeable — the same boundary research.md R-013 records for a review that never
+    # starts. A fork contributor's change reaches `main` by a maintainer taking it onto a branch in
+    # this repository, where it is reviewed like anything else.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
     runs-on: [self-hosted, agents-host]
 
     steps:
