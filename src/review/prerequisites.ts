@@ -4,6 +4,7 @@ import {
   type PermissionLevel,
 } from "../github/auth.js";
 import { isGateRequired, type ProtectionOutcome } from "../github/branch-protection.js";
+import { MISSING_CREDENTIAL_REASON, type ModelCredential } from "../model/anthropic.js";
 import type { RoleOutcome } from "./gate.js";
 
 /**
@@ -27,11 +28,18 @@ export interface PrerequisiteInput {
   /** The check-run name branch protection must list. */
   readonly gateName: string;
   readonly baseBranch: string;
+  /**
+   * The resolved model credential, or `null` when none of the local sources FR-032 permits has
+   * one. Checked here rather than at the model call so an absent credential costs nothing and
+   * fails with a stated reason, instead of surfacing as a 401 partway through a review.
+   */
+  readonly modelCredential: ModelCredential | null;
 }
 
 export interface PrerequisiteResult {
   readonly satisfied: boolean;
   readonly permissionsHeld: boolean;
+  readonly modelCredentialPresent: boolean;
   readonly gateRequiredByBranchProtection: boolean;
   /** Named so a human can act on it (FR-024). */
   readonly missing: readonly string[];
@@ -80,17 +88,19 @@ function protectionReason(
 }
 
 export function checkPrerequisites(input: PrerequisiteInput): PrerequisiteResult {
-  const { granted, protection, gateName, baseBranch } = input;
+  const { granted, protection, gateName, baseBranch, modelCredential } = input;
 
   const missing = missingPermissions(granted, REQUIRED_INSTALLATION_PERMISSIONS);
   const permissionsHeld = missing.length === 0;
 
+  const modelCredentialPresent = modelCredential !== null;
   const gateRequired = isGateRequired(protection, gateName);
 
-  if (permissionsHeld && gateRequired) {
+  if (permissionsHeld && modelCredentialPresent && gateRequired) {
     return {
       satisfied: true,
       permissionsHeld: true,
+      modelCredentialPresent: true,
       gateRequiredByBranchProtection: true,
       missing: [],
       reason: null,
@@ -110,6 +120,10 @@ export function checkPrerequisites(input: PrerequisiteInput): PrerequisiteResult
     );
   }
 
+  if (!modelCredentialPresent) {
+    reasons.push(MISSING_CREDENTIAL_REASON);
+  }
+
   if (!gateRequired) {
     reasons.push(protectionReason(protection, gateName, baseBranch));
   }
@@ -117,6 +131,7 @@ export function checkPrerequisites(input: PrerequisiteInput): PrerequisiteResult
   return {
     satisfied: false,
     permissionsHeld,
+    modelCredentialPresent,
     gateRequiredByBranchProtection: gateRequired,
     missing,
     reason: reasons.join("; "),

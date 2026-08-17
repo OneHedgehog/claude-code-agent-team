@@ -21,8 +21,8 @@ For each pull request, in order:
 
 1. Resolves the target repository's constitution and operating settings **through an explicit
    `--target` parameter**, never through the working directory.
-2. Verifies its own prerequisites before spending anything — the permissions it holds, and that its
-   check run is a required check on the base branch.
+2. Verifies its own prerequisites before spending anything — the permissions it holds, that a model
+   credential exists, and that its check run is a required check on the base branch.
 3. Refuses to review its own work, an empty diff, an oversized diff, a stalled round, or a round past
    the cap — each with a stated reason and zero model spend.
 4. Runs the security and implementation reviewers against the diff.
@@ -239,7 +239,7 @@ target.
 
 | Layer | Model | Gates merge | Status |
 |---|---|---|---|
-| Unit | Not invoked | Yes | 546 tests passing |
+| Unit | Not invoked | Yes | 562 tests passing |
 | Integration | Not invoked | Yes | 52 tests passing |
 | End-to-end | Scripted double | Yes | **Not yet runnable** — needs the App and fixture repository |
 

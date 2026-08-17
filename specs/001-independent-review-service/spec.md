@@ -890,3 +890,43 @@ Each is a later feature that depends on this one.
 - A human-approved waiver, when one is granted, recorded against the reviewed revision where the
   service can read it — the service raises the waiver request but does not grant or record the
   decision (FR-045).
+
+## Post-Ratification Addenda
+
+Principle IX: *"The spec under `specs/` records what was intended, at the time it was intended, and
+is never rewritten."* Nothing above this heading is edited. Where a decision has moved since the
+spec was written, it is recorded here as a dated entry, so the original intent and its later
+revision are both legible. What is true *now* is in
+[docs/independent-review-service.md](../../docs/independent-review-service.md) and
+[docs/prerequisites.md](../../docs/prerequisites.md); this section only records that a change
+happened and why.
+
+### 2026-08-17 — FR-032: a third local credential source
+
+**FR-032 as written** enumerates two sources: "Model credentials MUST come from the local
+environment or an OS keychain, MUST NOT be read from continuous-integration secrets, and MUST NOT
+appear in records, comments, or prompts."
+
+**What changed.** The service now also accepts an OAuth profile written by `ant auth login` under
+`~/.config/anthropic/` (relocatable via `ANTHROPIC_CONFIG_DIR`), and that is the preferred source.
+This is the implemented and verified path; a static `ANTHROPIC_API_KEY` remains supported.
+
+**Why the requirement itself is unchanged.** FR-032's invariant is that the credential is *local to
+the runner*, never from CI, and never in records, comments, or prompts. A profile satisfies all
+three, and satisfies the third more strongly than either original source: the SDK reads the profile
+itself, so **the secret never enters the service's process at all** — there is no value in memory to
+redact, log, or leak. The enumeration was a closed list of two written before the profile path was
+considered; the property it was protecting is intact.
+
+**Consequences recorded elsewhere:**
+
+- Amazon Bedrock and Google Vertex AI were considered and rejected — both require a cloud account,
+  which Principle IV prohibits without a constitutional amendment. Workload Identity Federation
+  remains the likely end state for an unattended runner, because OAuth refresh tokens hard-expire.
+- The credential is now resolved to a `ModelCredential` carrying its `source`, rather than to a
+  bare key string, because a profile credential legitimately carries no key.
+- **Presence is verified as a startup prerequisite**, alongside the FR-003 permission check and the
+  FR-025 branch-protection check, so an absent credential fails with a stated reason and zero spend
+  rather than surfacing as a `401` partway through a review. FR-051 names only permissions and
+  branch protection; this extends the same pre-spend discipline to FR-032 without altering what
+  FR-051 requires.

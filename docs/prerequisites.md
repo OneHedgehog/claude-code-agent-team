@@ -139,12 +139,21 @@ which case requests authenticate with an empty key rather than falling through. 
 of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_PROFILE` unset on the runner unless
 you mean to use one. All three are currently unset on this machine.
 
-### Consequence for the code
+### How the code resolves it
 
-[`AnthropicModelClient`](../src/model/anthropic.ts) **cannot use a profile as written.** Its
-constructor throws `MissingCredentialError` on an empty key, and `readModelCredential` only knows
-the environment and the keychain. Supporting a profile means making the credential *optional* so a
-bare client construction is allowed. Not yet done.
+[`resolveModelCredential`](../src/model/anthropic.ts) returns a `ModelCredential` carrying its
+`source` — `environment`, `keychain`, or `oauth-profile` — rather than a bare key string, because a
+profile credential legitimately carries **no key**: the SDK reads the profile itself, so the secret
+never enters the service's process.
+
+It checks the three sources in the SDK's own resolution order, deliberately. Reporting a profile
+while `ANTHROPIC_API_KEY` is set would name a source the SDK is about to ignore.
+
+**Absence is a startup prerequisite failure, not a runtime one.** `checkPrerequisites` verifies a
+credential exists alongside the permission and branch-protection checks, so a missing one fails with
+a stated reason and **zero spend** rather than surfacing as a `401` partway through a review — the
+same discipline FR-051 applies to everything else. The adapter still refuses a source that promises
+a key and supplies an empty one; it just no longer treats "no key" as automatically wrong.
 
 ### What the App still needs
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkPrerequisites } from "../../../src/review/prerequisites.js";
+import { checkPrerequisites, type PrerequisiteInput } from "../../../src/review/prerequisites.js";
 import {
   classifyProtectionResponse,
   isGateRequired,
@@ -30,12 +30,13 @@ function protectedWith(contexts: readonly string[]): ProtectionOutcome {
   return { kind: "protected", requiredContexts: contexts };
 }
 
-function input(overrides: Partial<Parameters<typeof checkPrerequisites>[0]> = {}) {
+function input(overrides: Partial<PrerequisiteInput> = {}): PrerequisiteInput {
   return {
     granted: HELD,
     protection: protectedWith([MERGE_GATE_CHECK_NAME]),
     gateName: MERGE_GATE_CHECK_NAME,
     baseBranch: "main",
+    modelCredential: { source: "oauth-profile", apiKey: null },
     ...overrides,
   };
 }
@@ -201,9 +202,63 @@ describe("checkPrerequisites — the gate is not required (FR-025, FR-051)", () 
   });
 });
 
+describe("checkPrerequisites — the model credential (FR-032)", () => {
+  it("passes with an OAuth profile, which carries no key", () => {
+    const result = checkPrerequisites(
+      input({ modelCredential: { source: "oauth-profile", apiKey: null } }),
+    );
+
+    expect(result.modelCredentialPresent).toBe(true);
+    expect(result.satisfied).toBe(true);
+  });
+
+  it("passes with an environment key", () => {
+    const result = checkPrerequisites(
+      input({ modelCredential: { source: "environment", apiKey: "sk-ant-whatever" } }),
+    );
+
+    expect(result.modelCredentialPresent).toBe(true);
+  });
+
+  it("fails before any spend when no local source has one", () => {
+    const result = checkPrerequisites(input({ modelCredential: null }));
+
+    expect(result.satisfied).toBe(false);
+    expect(result.modelCredentialPresent).toBe(false);
+    expect(result.tokensSpent).toBe(0);
+    expect(result.verdicts).toHaveLength(0);
+    expect(result.escalate).toBe(true);
+  });
+
+  it("names every place an operator could put one", () => {
+    const result = checkPrerequisites(input({ modelCredential: null }));
+
+    expect(result.reason).toContain("ant auth login");
+    expect(result.reason).toContain("ANTHROPIC_API_KEY");
+    expect(result.reason).toMatch(/keychain/i);
+  });
+
+  it("states that a CI secret is not among them", () => {
+    const result = checkPrerequisites(input({ modelCredential: null }));
+
+    // FR-032: the reviewer runs on a self-hosted runner precisely so the key never enters CI.
+    expect(result.reason).toMatch(/Actions secret/i);
+  });
+
+  it("reports a missing credential alongside other missing prerequisites, not instead of them", () => {
+    const result = checkPrerequisites(
+      input({ modelCredential: null, protection: { kind: "unprotected" } }),
+    );
+
+    expect(result.reason).toContain("ant auth login");
+    expect(result.reason).toContain("not protected");
+  });
+});
+
 describe("checkPrerequisites — every failing path is free and silent (FR-051)", () => {
   const failing: ReadonlyArray<[string, Parameters<typeof checkPrerequisites>[0]]> = [
     ["missing permission", input({ granted: {} })],
+    ["no model credential", input({ modelCredential: null })],
     ["gate not required", input({ protection: protectedWith([]) })],
     ["branch unprotected", input({ protection: { kind: "unprotected" } })],
     [

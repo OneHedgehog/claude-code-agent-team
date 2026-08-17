@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { Ajv2020 } from "ajv/dist/2020.js";
 
@@ -32,23 +35,79 @@ export interface MessagesApi {
   create(params: Record<string, unknown>): Promise<unknown>;
 }
 
+export type CredentialSource = "environment" | "keychain" | "oauth-profile";
+
+export interface ModelCredential {
+  readonly source: CredentialSource;
+  /**
+   * Absent for `oauth-profile`: the SDK reads the profile itself, so the secret never enters this
+   * process at all. That is the point of preferring it — there is no value here to leak.
+   */
+  readonly apiKey: string | null;
+}
+
+/** Where `ant auth login` stores its profile. `ANTHROPIC_CONFIG_DIR` relocates it. */
+export function oauthProfileDir(env: Record<string, string | undefined>): string {
+  const configured = env["ANTHROPIC_CONFIG_DIR"];
+  if (typeof configured === "string" && configured !== "") return configured;
+
+  return join(env["HOME"] ?? homedir(), ".config", "anthropic");
+}
+
+/** Whether an `ant auth login` profile exists. Presence only — never reads the credential. */
+export function oauthProfilePresent(env: Record<string, string | undefined>): boolean {
+  return existsSync(join(oauthProfileDir(env), "credentials"));
+}
+
 /**
- * The credential, from the two sources FR-032 permits. Actions secrets are not among them: the
- * reviewer runs on a self-hosted runner precisely so the key never has to enter CI.
+ * The credential, from the three **local** sources FR-032 permits. Actions secrets are not among
+ * them: the reviewer runs on a self-hosted runner precisely so the key never has to enter CI.
+ *
+ * Returns `null` rather than throwing, so the startup prerequisite check can *report* a missing
+ * credential with a reason instead of dying with a stack trace — the same posture every other
+ * prerequisite takes (FR-051). `requireModelCredential` is the fail-fast wrapper.
+ *
+ * The order matters and is not arbitrary: it mirrors the SDK's own resolution, in which
+ * `ANTHROPIC_API_KEY` **shadows a profile — including when set to the empty string**. Detecting the
+ * key first means this function agrees with what the SDK will actually do, rather than reporting a
+ * profile the SDK is about to ignore.
  */
-export function readModelCredential(options: {
+export function resolveModelCredential(options: {
   env: Record<string, string | undefined>;
   keychain?: () => string | null;
-}): string {
+  profilePresent?: (env: Record<string, string | undefined>) => boolean;
+}): ModelCredential | null {
   const fromEnv = options.env["ANTHROPIC_API_KEY"];
-  if (typeof fromEnv === "string" && fromEnv !== "") return fromEnv;
+  if (typeof fromEnv === "string" && fromEnv !== "") {
+    return { source: "environment", apiKey: fromEnv };
+  }
 
   const fromKeychain = options.keychain?.() ?? null;
-  if (fromKeychain !== null && fromKeychain !== "") return fromKeychain;
+  if (fromKeychain !== null && fromKeychain !== "") {
+    return { source: "keychain", apiKey: fromKeychain };
+  }
 
-  throw new MissingCredentialError(
-    "no model credential: set ANTHROPIC_API_KEY in the runner's local environment, or store it in the OS keychain. It must never be supplied as an Actions secret (FR-032).",
-  );
+  const present = options.profilePresent ?? oauthProfilePresent;
+  if (present(options.env)) {
+    return { source: "oauth-profile", apiKey: null };
+  }
+
+  return null;
+}
+
+export const MISSING_CREDENTIAL_REASON =
+  "no model credential: run `ant auth login` to create an OAuth profile, or set " +
+  "ANTHROPIC_API_KEY in the runner's local environment, or store it in the OS keychain. " +
+  "It must never be supplied as an Actions secret (FR-032).";
+
+/** Fail-fast form, for callers that cannot proceed without one. */
+export function requireModelCredential(
+  options: Parameters<typeof resolveModelCredential>[0],
+): ModelCredential {
+  const credential = resolveModelCredential(options);
+  if (credential === null) throw new MissingCredentialError(MISSING_CREDENTIAL_REASON);
+
+  return credential;
 }
 
 /** Reads the credential from the macOS keychain. Never logged, never returned to a caller twice. */
@@ -233,7 +292,11 @@ function readText(response: unknown): string | null {
 }
 
 export interface AnthropicOptions {
-  readonly apiKey: string;
+  /**
+   * The resolved credential. An `oauth-profile` credential carries no key — the SDK reads the
+   * profile itself — which is why this is a `ModelCredential` and not a string.
+   */
+  readonly credential: ModelCredential;
   readonly messages: MessagesApi;
   readonly model?: string;
 }
@@ -243,13 +306,20 @@ export class AnthropicModelClient implements ModelClient {
   readonly #model: string;
 
   /**
-   * The key is accepted so that construction fails loudly when it is absent, but it is never
-   * stored on the instance — the SDK client already holds it, and a second copy is a second place
-   * it could leak from.
+   * The credential is accepted so construction fails loudly on a malformed one, but it is never
+   * stored on the instance — the SDK client already holds whatever it needs, and a second copy is
+   * a second place it could leak from.
+   *
+   * An `oauth-profile` credential legitimately carries no key, so absence alone is not an error;
+   * only a source that promises a key and then supplies an empty one is. Whether *any* credential
+   * exists is settled earlier, by the startup prerequisite check, so that a missing one fails
+   * before any spend rather than as a 401 mid-review (FR-051).
    */
   constructor(options: AnthropicOptions) {
-    if (options.apiKey === "") {
-      throw new MissingCredentialError("a model credential is required");
+    const { credential } = options;
+
+    if (credential.source !== "oauth-profile" && (credential.apiKey ?? "") === "") {
+      throw new MissingCredentialError(`credential source "${credential.source}" supplied no key`);
     }
 
     this.#messages = options.messages;
