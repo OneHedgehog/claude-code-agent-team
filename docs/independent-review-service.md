@@ -190,15 +190,22 @@ merge, cannot push, and cannot alter branch protection.
 
 ## Human prerequisites
 
-None of these can be done by the service. An identity that can provision its own gate can remove it.
+Six things must be set up before the service can run against a real pull request, and none of them
+can be done by the service — an identity that can provision its own gate can remove it.
 
-| Prerequisite | Blocks | Notes |
+**[docs/prerequisites.md](prerequisites.md) is the checklist**, with the current state of each, the
+order to do them in, and the reasoning. In summary:
+
+| # | Prerequisite | State |
 |---|---|---|
-| **GitHub App** created and installed on both repositories, permissions as above, private key in the runner's environment or keychain | Every end-to-end test, and real operation | Only an App can create a check run; no PAT substitutes at any scope |
-| **Private fixture repository** | Every end-to-end test | Cannot be the target repository: one scenario needs a branch where the gate is deliberately *not* required |
-| **Self-hosted runner** registered, job-slot count set to the host-wide concurrency cap | Every end-to-end test, and real operation | Reviewer jobs take an ordinary slot |
-| **`ANTHROPIC_API_KEY`** in the runner's local environment or keychain | Production runs | Never in Actions secrets — that would put the model credential inside the blast radius of the pull requests it reviews |
-| **Branch protection** requiring `independent-review` on the default branch | Real operation | Available now the repository is public; `main` is still unprotected. See [the merge gate](#the-merge-gate) |
+| 1 | GitHub App — the reviewing identity | Not created |
+| 2 | Model API key, on the runner and never in Actions secrets | Not provisioned |
+| 3 | Fork CI blocking | Done |
+| 4 | Self-hosted runner, labelled `agents-host` | Not registered |
+| 5 | Branch protection requiring `independent-review` | Available, not configured |
+| 6 | Fixture repository for the e2e suite | Not created |
+
+None of these block `npm run check`. They block real operation and all 28 `tests/e2e/**` tasks.
 
 ## The merge gate
 
