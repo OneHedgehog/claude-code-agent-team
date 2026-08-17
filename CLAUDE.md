@@ -18,8 +18,13 @@ prerequisite discovered mid-run has already cost money and left partial state.
 ## Model credential: an OAuth profile, not an API key
 
 The chosen path is `ant auth login`, which stores a profile under `~/.config/anthropic/` that the
-SDKs read automatically — a bare `new Anthropic()` works with no environment variable set. **Neither
-the `ant` CLI nor a profile exists on this machine yet**, so no model call can succeed by any route.
+SDKs read automatically. **Verified working 2026-08-17**: a bare `new Anthropic()` — no argument, no
+environment variable — authenticates and runs inference. Scopes `user:developer user:inference
+user:profile`.
+
+Access tokens are short-lived (~8h) and refresh automatically; the *refresh* token hard-expires
+eventually, at which point `ant auth login` must be re-run. `ant auth status` shows the active
+source and expiry.
 
 `ANTHROPIC_API_KEY` **shadows the profile — including when set to the empty string**, which
 authenticates with an empty key instead of falling through. Resolution order:

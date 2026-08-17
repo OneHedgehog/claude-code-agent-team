@@ -109,7 +109,11 @@ sitting in the environment or the keychain.
 Rejected: Amazon Bedrock and Google Vertex AI, both of which need a cloud account and so are
 prohibited by Principle IV without a constitutional amendment.
 
-Neither the CLI nor a profile exists yet. To create one:
+**Verified working 2026-08-17.** A bare `new Anthropic()` — no argument, no environment variable —
+authenticates through the profile and runs inference. Scopes: `user:developer user:inference
+user:profile`.
+
+To recreate it on another machine:
 
 ```bash
 brew install anthropics/tap/ant
@@ -117,7 +121,8 @@ xattr -d com.apple.quarantine "$(brew --prefix)/bin/ant"
 ant auth login
 ```
 
-`ant auth status` then shows which credential source and profile is active.
+`ant auth status` shows the active credential source, the profile, and the token expiry. Access
+tokens are short-lived (~8h) and refresh automatically.
 
 > **An agent must never run `ant auth login` on your behalf** — see [Authorisation is yours](#authorisation-is-yours) below.
 
