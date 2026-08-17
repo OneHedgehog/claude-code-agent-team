@@ -75,15 +75,20 @@ jobs:
       - name: Review
         working-directory: checkout
         env:
-          # From the runner's own environment, never from Actions secrets (FR-032). A secret
-          # configured here would put the model credential inside the blast radius of the very
-          # pull requests this job reviews.
-          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
-          REVIEW_APP_ID: ${{ env.REVIEW_APP_ID }}
-          REVIEW_APP_PRIVATE_KEY: ${{ env.REVIEW_APP_PRIVATE_KEY }}
-          # FR-041: the job measures its own queue wait, so the threshold is checked against a
-          # figure the job can actually observe.
-          REVIEW_RUN_CREATED_AT: ${{ github.event.repository.updated_at }}
+          # FR-041: queue wait is measured from the workflow run's creation to this job starting.
+          # There is no context expression carrying the run's `created_at`, so the run id is passed
+          # and the CLI reads `GET /actions/runs/{id}` for it. Anything derivable from the event
+          # payload — `repository.updated_at`, for instance — measures something else entirely and
+          # would make the threshold meaningless.
+          REVIEW_RUN_ID: ${{ github.run_id }}
+        # ANTHROPIC_API_KEY, REVIEW_APP_ID and REVIEW_APP_PRIVATE_KEY are deliberately absent here.
+        # They come from the self-hosted runner's own environment, which `run:` steps inherit
+        # directly — never from Actions secrets, which would put the model credential and the App's
+        # private key inside the blast radius of the very pull requests this job reviews (FR-032).
+        #
+        # They must NOT be restated as `${{ env.NAME }}`: that expression reads the workflow's env
+        # context, which does not expose the host's environment, so it resolves to an empty string
+        # and then overrides the inherited value with it.
         run: |
           node dist/cli.js \
             --target "${{ github.repository }}" \
