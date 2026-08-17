@@ -4,6 +4,31 @@ Operational facts an agent needs before touching GitHub in this repository. Rati
 instructions live in [docs/github-access.md](docs/github-access.md); this file is the short version
 that has to be in context.
 
+## Check credentials up front; never authorise
+
+**Before starting work that needs a credential, verify it is present. If it is not, stop and ask —
+do not begin and discover the gap partway through.**
+
+Never run an authentication flow on the user's behalf: not `ant auth login`, not `gh auth login`,
+not a browser sign-in, not entering a token anywhere. Give the exact command and wait.
+
+This mirrors FR-051, which verifies every prerequisite before spending a token, because a
+prerequisite discovered mid-run has already cost money and left partial state.
+
+## Model credential: an OAuth profile, not an API key
+
+The chosen path is `ant auth login`, which stores a profile under `~/.config/anthropic/` that the
+SDKs read automatically — a bare `new Anthropic()` works with no environment variable set. **Neither
+the `ant` CLI nor a profile exists on this machine yet**, so no model call can succeed by any route.
+
+`ANTHROPIC_API_KEY` **shadows the profile — including when set to the empty string**, which
+authenticates with an empty key instead of falling through. Resolution order:
+`ANTHROPIC_API_KEY` → `ANTHROPIC_AUTH_TOKEN` → active profile → Workload Identity Federation →
+default profile on disk. All three variables are currently unset; keep them that way.
+
+`AnthropicModelClient` cannot use a profile as written — its constructor requires a non-empty key.
+See [docs/prerequisites.md](docs/prerequisites.md) §2.
+
 ## Repositories
 
 | Role | Repository | State |

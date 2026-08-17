@@ -9,6 +9,20 @@ This is the operational checklist. The *why* behind each choice lives in
 [independent-review-service.md](independent-review-service.md); the short version an agent needs in
 context lives in [CLAUDE.md](../CLAUDE.md).
 
+## Authorisation is yours
+
+**An agent checks for a credential and asks; it never authorises.** Before starting work that needs
+one, an agent must verify the credential is present and — if it is not — stop and ask, rather than
+beginning the work and surfacing the gap partway through.
+
+An agent must never run an authentication flow on your behalf: not `ant auth login`, not
+`gh auth login`, not a browser sign-in, not entering a token anywhere. It gives you the exact
+command and waits.
+
+This is the same discipline the service itself applies. FR-051 verifies every prerequisite *before*
+spending a token, because a prerequisite discovered mid-run has already cost money and left partial
+state behind. The rule above extends that from the service to the agents building it.
+
 ## Status
 
 | # | Prerequisite | State |
@@ -85,39 +99,72 @@ cannot be re-downloaded), then **Install App** on the target repository.
 
 ---
 
-## 2. Model API key
+## 2. Model credential
 
-`ANTHROPIC_API_KEY`, read from the **runner's local environment or the OS keychain**, and
-**never from Actions secrets** (FR-032). A secret configured in Actions would place the model
-credential inside the blast radius of the very pull requests the job reviews.
+**Decision (2026-08-17): authenticate through an OAuth profile, not a static API key.**
+`ant auth login` stores a profile under `~/.config/anthropic/` that the SDKs read automatically —
+a bare `new Anthropic()` works with no environment variable set, so there is no long-lived secret
+sitting in the environment or the keychain.
 
-This is also why the reviewer runs on a self-hosted runner at all: so the key never has to enter CI.
+Rejected: Amazon Bedrock and Google Vertex AI, both of which need a cloud account and so are
+prohibited by Principle IV without a constitutional amendment.
 
-Alongside it, the runner needs the App's identity from step 1:
+Neither the CLI nor a profile exists yet. To create one:
+
+```bash
+brew install anthropics/tap/ant
+xattr -d com.apple.quarantine "$(brew --prefix)/bin/ant"
+ant auth login
+```
+
+`ant auth status` then shows which credential source and profile is active.
+
+> **An agent must never run `ant auth login` on your behalf** — see [Authorisation is yours](#authorisation-is-yours) below.
+
+### The shadowing trap
+
+Credentials resolve in this order, first match wins:
+
+```
+ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → the active OAuth profile → Workload Identity Federation → the default profile on disk
+```
+
+**`ANTHROPIC_API_KEY` beats the profile — and beats it even when set to the empty string**, in
+which case requests authenticate with an empty key rather than falling through. Keep all three
+of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_PROFILE` unset on the runner unless
+you mean to use one. All three are currently unset on this machine.
+
+### Consequence for the code
+
+[`AnthropicModelClient`](../src/model/anthropic.ts) **cannot use a profile as written.** Its
+constructor throws `MissingCredentialError` on an empty key, and `readModelCredential` only knows
+the environment and the keychain. Supporting a profile means making the credential *optional* so a
+bare client construction is allowed. Not yet done.
+
+### What the App still needs
+
+Independent of the model credential, the runner needs the App's identity from step 1:
 
 | Variable | Secret? | Source |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Keychain → runner environment |
-| `REVIEW_APP_PRIVATE_KEY` | Yes | The `.pem` from step 1 |
+| `REVIEW_APP_PRIVATE_KEY` | Yes | The `.pem` from step 1 — `security add-generic-password -s review-app-private-key -w` |
 | `REVIEW_APP_ID` | No | The numeric App ID |
 
-Store the secrets the same way the PAT is stored:
-
-```bash
-security add-generic-password -s review-app-private-key -w
-```
-
-> **They must not be restated in the workflow as `${{ env.NAME }}`.** That expression reads the
+> **These must not be restated in the workflow as `${{ env.NAME }}`.** That expression reads the
 > *workflow's* env context, which does not expose the runner host's environment — it resolves to an
 > empty string and then overrides the inherited value with it. `run:` steps inherit the host
 > environment directly, which is why [`review.yml`](../.github/workflows/review.yml) does not
-> mention these three variables at all.
+> mention them at all.
 
-**TBD.** Which Anthropic account or billing entity provides the key is not yet decided, and no key
-has been provisioned. Note that model spend is metered against `tokenBudget` in
-[`.agents/settings.json`](../.agents/settings.json), currently `20000000` with a `5000000` reviewer
-reserve — placeholder figures chosen before any real usage data existed. Revisit both once a first
-review has actually run.
+**Known limitation.** OAuth refresh tokens hard-expire rather than sliding with use, so an
+unattended runner will eventually start failing auth and need a fresh `ant auth login`. Workload
+Identity Federation is the documented answer for non-interactive workloads and is the likely end
+state — it needs org-level federation setup that does not exist yet.
+
+**TBD.** Which Anthropic account or billing entity backs the profile. Model spend is metered against
+`tokenBudget` in [`.agents/settings.json`](../.agents/settings.json), currently `20000000` with a
+`5000000` reviewer reserve — placeholders chosen before any usage data existed. Revisit both once a
+first review has actually run.
 
 ### Related: the authoring PAT
 
