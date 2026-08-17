@@ -91,6 +91,40 @@ Subscribe to events: **none**. There are no webhooks.
 After creating: note the **App ID**, click **Generate a private key** (the `.pem` downloads once and
 cannot be re-downloaded), then **Install App** on the target repository.
 
+### Storing it, and minting tokens
+
+[`scripts/github-app-token.sh`](../scripts/github-app-token.sh) holds the App's credentials and
+mints short-lived installation tokens on demand:
+
+```bash
+./scripts/github-app-token.sh --set-app-id <id>
+./scripts/github-app-token.sh --set-key < ~/Downloads/your-app.private-key.pem
+./scripts/github-app-token.sh --check
+```
+
+`--check` prints the installation ID and the granted permissions — useful for confirming the
+permission table above against what GitHub actually granted — and deliberately prints no token.
+Running it with no arguments prints an installation token, which expires in an hour and is never
+stored.
+
+Consume it so the value never reaches a transcript or shell history:
+
+```bash
+T="$(./scripts/github-app-token.sh)" curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/OWNER/REPO/pulls
+```
+
+The private key lives at `~/.config/github-app/review-app.pem`, mode `0600`, and the script refuses
+to run if the permissions are looser. **Not** the keychain, unlike the PAT: `security -w` silently
+truncates a piped value at 128 characters and a 2048-bit PEM base64s to roughly 2,300, so it would
+be stored corrupted with no error. Passing it as an argument instead avoids the truncation but
+exposes the private key to `ps`. A `0600` file is how ssh and TLS hold private keys, and openssl
+reads it directly.
+
+> One error message to know: GitHub answers a *well-formed* JWT signed by an unrecognised key with
+> `A JSON web token could not be decoded` — the same text it uses for a genuinely malformed token.
+> A nonexistent App ID, a key belonging to a different App, and a skewed clock are indistinguishable
+> from the response, so the script names all three rather than sending you after one.
+
 > **Naming warning.** The App's slug becomes its bot login, `<slug>[bot]`, and that string is what
 > [`self-review.ts`](../src/review/self-review.ts) compares the pull request author against for
 > FR-004. If the configured reviewing-identity name and the real slug disagree, the self-authored
