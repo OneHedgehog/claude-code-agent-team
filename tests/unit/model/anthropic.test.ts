@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AnthropicModelClient,
+  MAX_OUTPUT_TOKENS,
   MissingCredentialError,
   REVIEW_RESPONSE_SCHEMA,
   oauthProfileDir,
@@ -349,5 +350,28 @@ describe("usage is always reported (FR-031)", () => {
     const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
 
     await expect(client.review(request())).rejects.toThrow(ModelError);
+  });
+});
+
+describe("the per-response output ceiling", () => {
+  it("never asks for more output than the model will produce", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    // The number a budget slice used to supply. The API rejects a non-streaming request this
+    // large, and the rejection names streaming rather than the caller's arithmetic, so the clamp
+    // lives here rather than at every call site.
+    await client.review(request({ maxTokens: 1_250_000 }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(MAX_OUTPUT_TOKENS);
+  });
+
+  it("leaves a caller's smaller ceiling alone", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ maxTokens: 4000 }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(4000);
   });
 });

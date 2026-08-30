@@ -49,6 +49,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import {
   AnthropicModelClient,
+  MAX_OUTPUT_TOKENS,
   MISSING_CREDENTIAL_REASON,
   MissingCredentialError,
   type MessagesApi,
@@ -931,13 +932,22 @@ export async function reviewPullRequest(
     });
   }
 
+  // Two different numbers that used to be one, which is why a review could never reach the model.
+  //
+  // `maxTokens` is what a single response may *emit* -- the model's own limit, and nothing to do
+  // with what the run is allowed to spend. `reservation` is the budget check: a deliberately
+  // conservative per-role ceiling drawn from `reviewerTokenReserve`, which counts input, output,
+  // and every round. Deriving the first from the second asked for 1.25M output tokens and failed
+  // every call before it was sent.
+  const maxTokens = MAX_OUTPUT_TOKENS;
+  const reservation = Math.max(1, Math.floor(operating.reviewerTokenReserve / 4));
+
   // checkingBudgets (FR-031, FR-047). The estimate is the per-role ceiling times the roles that run.
-  const maxTokens = Math.max(1, Math.floor(operating.reviewerTokenReserve / 4));
   const budget = adapters.ledger.check(
     targetSlug(target),
     "review",
     "tokens",
-    maxTokens * operating.requiredReviewerRoles.length,
+    reservation * operating.requiredReviewerRoles.length,
   );
 
   if (!budget.allowed) {

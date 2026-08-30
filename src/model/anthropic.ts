@@ -26,6 +26,21 @@ import {
 
 export const REVIEW_MODEL = "claude-opus-5";
 
+/**
+ * The per-response output ceiling (`max_tokens`).
+ *
+ * This is a *response* cap, not a budget. The distinction is load-bearing and was got wrong once:
+ * a slice of `reviewerTokenReserve` -- a spend allowance for the whole run -- was passed here
+ * directly, asking for 1,250,000 output tokens. The model tops out at 128,000, and the SDK refuses
+ * a non-streaming request that large outright, so both roles failed with "Streaming is required for
+ * operations that may take longer than 10 minutes" before a single token was spent.
+ *
+ * 16,000 is the documented non-streaming ceiling that stays inside the SDK's HTTP timeout. A review
+ * returns structured findings against a diff bounded by `maxReviewableDiffSize`, so it has no reason
+ * to approach it; going higher would mean streaming, which buys nothing here.
+ */
+export const MAX_OUTPUT_TOKENS = 16_000;
+
 export class MissingCredentialError extends Error {
   override readonly name = "MissingCredentialError";
 }
@@ -342,7 +357,10 @@ export class AnthropicModelClient implements ModelClient {
     try {
       raw = await this.#messages.create({
         model: this.#model,
-        max_tokens: request.maxTokens,
+        // Clamped rather than trusted: a caller that computes this from a budget instead of from
+        // the model's own limit produces a number the API rejects, and the failure arrives as a
+        // vague streaming error rather than as anything naming the real cause.
+        max_tokens: Math.min(request.maxTokens, MAX_OUTPUT_TOKENS),
         thinking: { type: "adaptive" },
         // The guard is a system prompt rather than the first line of the user turn, so that no
         // amount of reviewed content can push it out of position or appear to supersede it.
