@@ -16,6 +16,12 @@ import { resolveInTarget, type TargetRepository } from "./target.js";
  * indistinguishable from a setting that was never applied. The schema's `default` keyword is
  * documentation for required settings and a genuine fallback only for the two optional ones, so a
  * missing budget can never be filled in from the schema.
+ *
+ * The shared `host` section is validated exactly as strictly as this service's own, and that is
+ * not a contradiction of FR-050 but the correction of a too-broad reading of it (research.md
+ * R-019). FR-050 says a *sibling agent's* section is ignored rather than rejected. `host` belongs
+ * to no agent: Principle VIII's cap counts every agent job on the machine, so a cap held inside
+ * one agent's namespace would be the private counter R-019 rejects, spelled differently.
  */
 
 export type RoleName = "security" | "implementation";
@@ -26,6 +32,11 @@ export interface EscalationChannel {
   readonly type: "github-issue";
   readonly assignee: string;
   readonly label: string;
+}
+
+/** The shared, agent-agnostic section. Read by this service, owned by none (R-019). */
+export interface HostSettings {
+  readonly maxConcurrentAgents: number;
 }
 
 export interface OperatingSettings {
@@ -42,11 +53,15 @@ export interface OperatingSettings {
   readonly maxRateLimitWaitSeconds: number;
   readonly maxQueueWaitSeconds: number;
   readonly escalationChannel: EscalationChannel;
+  readonly pollIntervalSeconds: number;
+  /** A ceiling on the reviewer's share of the host cap, never a raise above it (R-019). */
+  readonly maxConcurrentReviews: number;
   readonly modelEffort: ModelEffort;
 }
 
 export interface LoadedSettings {
   readonly settings: OperatingSettings;
+  readonly host: HostSettings;
   /** Optional settings and the values actually applied, reported with the run (FR-054). */
   readonly effectiveOptionalSettings: Readonly<Record<string, unknown>>;
 }
@@ -84,7 +99,7 @@ const SCHEMA_URL = new URL("../../schemas/settings.schema.json", import.meta.url
 const schema = JSON.parse(readFileSync(SCHEMA_URL, "utf8")) as SchemaShape &
   Record<string, unknown>;
 
-/** The 13 settings whose absence stops the run (FR-028). */
+/** The settings whose absence stops the run (FR-028) — read from the schema, never re-listed. */
 export const REQUIRED_SETTING_KEYS: readonly string[] = schema.$defs.reviewServiceSettings.required;
 
 /** The two settings whose absence is filled from the documented default instead (FR-054). */
@@ -116,10 +131,13 @@ function describe(error: ErrorObject): string {
 }
 
 /**
- * The three cross-field invariants JSON Schema cannot express (data-model.md, OperatingSettings).
+ * The cross-field invariants JSON Schema cannot express (data-model.md, OperatingSettings).
  * Every violation is collected rather than short-circuited, so one run reports every problem.
  */
-function invariantProblems(section: Record<string, unknown>): string[] {
+function invariantProblems(
+  section: Record<string, unknown>,
+  host: Record<string, unknown>,
+): string[] {
   const problems: string[] = [];
   const num = (key: string): number => section[key] as number;
 
@@ -139,6 +157,22 @@ function invariantProblems(section: Record<string, unknown>): string[] {
     );
   }
 
+  // R-019: `maxConcurrentReviews` is a ceiling on the reviewer's share of the host's cap, so a
+  // value above it is not a stricter setting read leniently — it is a setting that cannot mean
+  // what it says, since a review must hold a host lease as well as a worker to start.
+  //
+  // The companion bound, `host.maxConcurrentAgents >= 1`, is not here because it is not a
+  // cross-field question: the schema states it as `minimum: 1`, which is where a single-field
+  // bound belongs. Restating it in code would be validation no input could ever reach.
+  const maxConcurrentAgents = host["maxConcurrentAgents"] as number;
+  if (num("maxConcurrentReviews") > maxConcurrentAgents) {
+    problems.push(
+      `settings.reviewService: maxConcurrentReviews (${num("maxConcurrentReviews")}) must not ` +
+        `exceed host.maxConcurrentAgents (${maxConcurrentAgents}); reviewer jobs take an ordinary ` +
+        `slot in the host-wide cap and are never exempted from it (FR-041, Principle VIII)`,
+    );
+  }
+
   return problems;
 }
 
@@ -151,9 +185,12 @@ export function validateSettings(raw: unknown): LoadedSettings {
     throw new SettingsError((validate.errors ?? []).map(describe));
   }
 
-  const section = (raw as { reviewService: Record<string, unknown> }).reviewService;
+  const { reviewService: section, host } = raw as {
+    reviewService: Record<string, unknown>;
+    host: Record<string, unknown>;
+  };
 
-  const problems = invariantProblems(section);
+  const problems = invariantProblems(section, host);
   if (problems.length > 0) {
     throw new SettingsError(problems);
   }
@@ -175,6 +212,8 @@ export function validateSettings(raw: unknown): LoadedSettings {
     platformApiReserve: section["platformApiReserve"] as number,
     maxRateLimitWaitSeconds: section["maxRateLimitWaitSeconds"] as number,
     maxQueueWaitSeconds: section["maxQueueWaitSeconds"] as number,
+    pollIntervalSeconds: section["pollIntervalSeconds"] as number,
+    maxConcurrentReviews: section["maxConcurrentReviews"] as number,
     escalationChannel: {
       type: channel["type"] as "github-issue",
       assignee: channel["assignee"] as string,
@@ -185,6 +224,7 @@ export function validateSettings(raw: unknown): LoadedSettings {
 
   return {
     settings,
+    host: { maxConcurrentAgents: host["maxConcurrentAgents"] as number },
     effectiveOptionalSettings: { modelEffort, "escalationChannel.label": label },
   };
 }

@@ -24,6 +24,12 @@ export interface OwnThread {
   readonly isResolved: boolean;
   /** Author replies to this finding, in order. Untrusted data (FR-036). */
   readonly replies: readonly string[];
+  /**
+   * When the newest reply arrived, or `null` when there is none. FR-046's forward-progress check
+   * and R-018's clause (b) both compare it against a round's conclusion time; neither can be
+   * answered from the reply bodies alone.
+   */
+  readonly latestReplyAt: string | null;
   /** Rounds this thread has been open. Recorded for the run, never a reason to resolve. */
   readonly roundsOpen?: number;
 }

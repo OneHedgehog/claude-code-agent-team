@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  binaryPathsFromDiff,
   binaryPathsFromNumstat,
   matchesPattern,
   resolveExcludedPaths,
@@ -140,5 +141,69 @@ describe("reading git's own binary report", () => {
 
   it("reports nothing for an empty diff", () => {
     expect(binaryPathsFromNumstat("")).toEqual([]);
+  });
+});
+
+describe("reading git's binary report out of a unified diff", () => {
+  it("takes the post-image path from a `Binary files … differ` line", () => {
+    const diff = [
+      "diff --git a/src/cli.ts b/src/cli.ts",
+      "--- a/src/cli.ts",
+      "+++ b/src/cli.ts",
+      "@@ -1,1 +1,2 @@",
+      " const a = 1;",
+      "+const b = 2;",
+      "diff --git a/assets/logo.png b/assets/logo.png",
+      "index 0000000..1111111",
+      "Binary files a/assets/logo.png and b/assets/logo.png differ",
+    ].join("\n");
+
+    expect(binaryPathsFromDiff(diff)).toEqual(["assets/logo.png"]);
+  });
+
+  it("takes the added path when the pre-image is /dev/null", () => {
+    const diff = [
+      "diff --git a/assets/logo.png b/assets/logo.png",
+      "new file mode 100644",
+      "Binary files /dev/null and b/assets/logo.png differ",
+    ].join("\n");
+
+    expect(binaryPathsFromDiff(diff)).toEqual(["assets/logo.png"]);
+  });
+
+  it("falls back to the pre-image path when the binary file was deleted", () => {
+    const diff = [
+      "diff --git a/assets/old.png b/assets/old.png",
+      "deleted file mode 100644",
+      "Binary files a/assets/old.png and /dev/null differ",
+    ].join("\n");
+
+    // Excluding a deletion under `/dev/null` would exclude a path no file has, leaving the real
+    // one counted as reviewable content.
+    expect(binaryPathsFromDiff(diff)).toEqual(["assets/old.png"]);
+  });
+
+  it("reads the header path when the patch itself is included", () => {
+    const diff = [
+      "diff --git a/assets/logo.png b/assets/logo.png",
+      "index 0000000..1111111",
+      "GIT binary patch",
+      "literal 70",
+      "zcmV",
+    ].join("\n");
+
+    expect(binaryPathsFromDiff(diff)).toEqual(["assets/logo.png"]);
+  });
+
+  it("reports nothing for a diff with no binary file in it", () => {
+    const diff = [
+      "diff --git a/src/cli.ts b/src/cli.ts",
+      "--- a/src/cli.ts",
+      "+++ b/src/cli.ts",
+      "@@ -1,1 +1,2 @@",
+      "+const b = 2;",
+    ].join("\n");
+
+    expect(binaryPathsFromDiff(diff)).toEqual([]);
   });
 });

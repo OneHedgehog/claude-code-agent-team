@@ -120,6 +120,8 @@ describe("App JWT to installation-token exchange (FR-002, FR-003)", () => {
         this.calls.push(input);
         return response;
       },
+      installationForRepo: (): Promise<{ installationId: number; appSlug: string }> =>
+        Promise.resolve({ installationId: 1, appSlug: "reviewer-app" }),
     };
   }
 

@@ -2,8 +2,10 @@ name: CI
 
 # The constitution's Technology section: "CI MUST run the same commands a developer runs locally;
 # a check that only exists in CI is prohibited." This workflow therefore runs exactly `npm run
-# check` and nothing else. E2E is not here: it needs the private fixture repository and the App
-# installation, which are human prerequisites (tasks.md), and it runs on the self-hosted runner.
+# check` and nothing else. E2E is not here: it needs the public fixture repository and the App
+# installation, which are human prerequisites (tasks.md), and it runs on the developer machine
+# beside the service itself (research.md R-017). This workflow stays on GitHub-hosted runners: it
+# builds and tests, needs no model credential, and was never what FR-032 constrained.
 
 on:
   push:
