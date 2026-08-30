@@ -1,0 +1,22 @@
+# Gitleaks configuration.
+#
+# The default rule set, plus one narrow exemption. Nothing here weakens the scan for anything but
+# the exact literal it names.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+The private-key fixture in the installation-token test.
+
+That test exists to prove `readAppPrivateKey` refuses a key whose file mode is looser than 0600 --
+the way ssh refuses one -- so by construction it has to contain something PEM-shaped. The body is a
+16-character base64 stub, not a key.
+
+Scoped by path AND literal rather than by path alone, so a real key pasted into this same file is
+still caught.
+"""
+matchCondition = "AND"
+paths = ['''tests/unit/github/installation-token\.test\.ts''']
+regexes = ['''MIIEowIBAAKCAQEA''']
