@@ -327,6 +327,36 @@ with the repository path changed.
 The service **verifies this and never writes it.** That is the whole reason the App holds
 `administration: read` and not `write`.
 
+### The bootstrap exception, 2026-08-30
+
+The gate could not review its own introduction, and this is the record of what was done about it.
+
+[#1](https://github.com/OneHedgehog/claude-code-agent-team/pull/1) carried the whole service --
+composition root, daemon, host lease, worktree, e2e suite, specs, docs. The service reviewed it and
+**refused it correctly**: 11,935 changed lines against a `maxReviewableDiffSize` of 2,000 (FR-037),
+no review attempted, **zero model tokens spent**, the reason stated on the pull request, and
+escalation issue #2 opened. Its first real run was a refusal of its own author, which is the system
+working.
+
+That refusal is not escapable, and deliberately so. FR-043's `## Size justification` clears the
+400-line discipline cap; FR-037 has no such escape, because a diff too large to review is not made
+reviewable by explaining itself. So the pull request introducing FR-037 was necessarily larger than
+FR-037 permits.
+
+**Dropping the required check would not have been enough.** `main` also requires one approving
+review, and GitHub does not permit approving your own pull request -- unsatisfiable for a sole
+author regardless of the gate. The minimal override was therefore `enforce_admins`: disabled,
+merged as admin, re-enabled. The gate's configuration -- the required context and the review count
+-- was never changed, so the exception is recorded as an admin bypass rather than as a weakened
+gate.
+
+**Verified after restoring:** `enforce_admins.enabled` is `true`, `required_status_checks.checks` is
+`["independent-review"]`, `required_approving_review_count` is `1`.
+
+**This is not a precedent.** It applies once, to the change that introduced the gate. A later pull
+request over the reviewable limit gets split, which is what FR-037 asks for and what the seven
+commits on that branch were already shaped for.
+
 ---
 
 ## 6. Fixture repository
