@@ -44,7 +44,7 @@ const WELL_FORMED = {
             rule: "hardcoded-credential",
             severity: "critical",
             blocking: true,
-            location: { path: "src/cli.ts", line: 3, side: "RIGHT" },
+            location: { pullRequestLevel: false, path: "src/cli.ts", line: 3, side: "RIGHT" },
             description: "A key is committed here.",
           },
         ],
@@ -373,5 +373,72 @@ describe("the per-response output ceiling", () => {
     await client.review(request({ maxTokens: 4000 }));
 
     expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(4000);
+  });
+});
+
+describe("the flat wire location (structured outputs rejects `oneOf`)", () => {
+  const withLocation = (location: unknown) => ({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          findings: [
+            {
+              rule: "r",
+              severity: "high",
+              blocking: true,
+              location,
+              description: "d",
+            },
+          ],
+          verdict: "request-changes",
+          replyJudgements: [],
+        }),
+      },
+    ],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+
+  it("restores a diff location as the union the rest of the service expects", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: false, path: "src/a.ts", line: 7, side: "LEFT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings[0]?.location).toEqual({ path: "src/a.ts", line: 7, side: "LEFT" });
+  });
+
+  it("drops the ignored fields when the finding is pull-request level", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: true, path: "src/a.ts", line: 7, side: "LEFT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("falls back to pull-request level rather than losing a finding it cannot place", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: false, path: "", line: 0, side: "RIGHT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("sends a schema with no `oneOf` anywhere in it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request());
+
+    expect(JSON.stringify(messages.sent[0])).not.toContain("oneOf");
   });
 });

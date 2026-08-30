@@ -7,6 +7,8 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 
 import {
   ModelError,
+  type FindingDraft,
+  type FindingLocation,
   type ModelClient,
   type ModelUsage,
   type ReviewRequest,
@@ -163,25 +165,21 @@ export const REVIEW_RESPONSE_SCHEMA = {
           rule: { type: "string", minLength: 1 },
           severity: { enum: ["critical", "high", "medium", "low"] },
           blocking: { type: "boolean" },
+          // Flat rather than a `oneOf` of two shapes, because structured outputs rejects `oneOf`
+          // outright: "Schema type 'oneOf' is not supported". The union survives where it matters
+          // -- `FindingLocation` is still a discriminated union everywhere downstream -- and
+          // `normalizeLocation` restores it at this boundary. When `pullRequestLevel` is true the
+          // other three fields are ignored, which is why they carry no constraints here.
           location: {
-            oneOf: [
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["path", "line", "side"],
-                properties: {
-                  path: { type: "string", minLength: 1 },
-                  line: { type: "integer", minimum: 1 },
-                  side: { enum: ["LEFT", "RIGHT"] },
-                },
-              },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["pullRequestLevel"],
-                properties: { pullRequestLevel: { const: true } },
-              },
-            ],
+            type: "object",
+            additionalProperties: false,
+            required: ["pullRequestLevel", "path", "line", "side"],
+            properties: {
+              pullRequestLevel: { type: "boolean" },
+              path: { type: "string" },
+              line: { type: "integer" },
+              side: { enum: ["LEFT", "RIGHT"] },
+            },
           },
           description: { type: "string", minLength: 1 },
         },
@@ -278,13 +276,49 @@ export function parseReviewResponse(
     );
   }
 
-  const response = parsed as Omit<ReviewResponse, "usage">;
+  const response = parsed as WireResponse;
 
   return {
-    findings: response.findings,
+    findings: response.findings.map((finding) => ({
+      rule: finding.rule,
+      severity: finding.severity,
+      blocking: finding.blocking,
+      location: normalizeLocation(finding.location),
+      description: finding.description,
+    })),
     verdict: response.verdict,
     replyJudgements: response.replyJudgements,
   };
+}
+
+/** The flat `location` the wire schema carries, before it becomes a `FindingLocation`. */
+interface WireLocation {
+  readonly pullRequestLevel: boolean;
+  readonly path: string;
+  readonly line: number;
+  readonly side: "LEFT" | "RIGHT";
+}
+
+type WireResponse = Omit<Omit<ReviewResponse, "usage">, "findings"> & {
+  readonly findings: readonly (Omit<FindingDraft, "location"> & {
+    readonly location: WireLocation;
+  })[];
+};
+
+/**
+ * Restores the discriminated union the flat wire shape flattened.
+ *
+ * A location that claims to be in the diff but names no file, or a line before the first, becomes
+ * pull-request level rather than an error. That is the same fallback `locations.ts` already applies
+ * to a location it cannot address: a finding the model could not place is still a finding, and
+ * discarding it because its coordinates are unusable would lose the very thing it was asked for
+ * (FR-014).
+ */
+function normalizeLocation(location: WireLocation): FindingLocation {
+  if (location.pullRequestLevel) return { pullRequestLevel: true };
+  if (location.path.trim() === "" || location.line < 1) return { pullRequestLevel: true };
+
+  return { path: location.path, line: location.line, side: location.side };
 }
 
 function readUsage(response: unknown): ModelUsage {
