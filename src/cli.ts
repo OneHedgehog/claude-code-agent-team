@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+
+import { composeService, reviewPullRequest } from "./composition.js";
 import {
   createTarget,
   parseTargetSlug,
@@ -6,7 +9,7 @@ import {
 } from "./config/target.js";
 
 /**
- * The entry point the reviewer workflow invokes (FR-026, FR-027).
+ * The entry point for reviewing one named pull request (FR-026, FR-027).
  *
  * Everything the run touches is resolved through `--target` and `--checkout`. There is no default
  * for either: a run that guessed its target from the working directory would review whatever
@@ -108,4 +111,47 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   }
 
   return { target, pullRequest };
+}
+
+/**
+ * Reviews the one pull request the arguments name, and reports whether the gate passed.
+ *
+ * This is the by-hand path beside the daemon's reconciling one. Both reach the same review through
+ * the same composition root; this one is addressed at a single pull request rather than at
+ * whatever the tick selected, which is what makes a run reproducible by hand from its record
+ * (Principle VII).
+ */
+export async function main(argv: readonly string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const runId = randomUUID();
+
+  const adapters = await composeService({ target: args.target, runId });
+  const outcome = await reviewPullRequest(adapters, args.pullRequest, { runId });
+
+  // A non-zero exit for anything but a pass. `unreported` is deliberately not a success: the run
+  // concluded nothing, and an exit code that said otherwise would be the non-failing gate
+  // Principle IV prohibits, spelled in shell.
+  return outcome.gate.conclusion === "success" ? 0 : 1;
+}
+
+/**
+ * Run only when this module is the program, so importing `main` from a test does not start a
+ * review.
+ */
+if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+  main(process.argv.slice(2)).then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (error: unknown) => {
+      // FR-024: whatever went wrong, say what it was. A stack trace with no reason is what this
+      // service exists to stop other people shipping.
+      //
+      // Written to stderr directly rather than through the logger: a failure here may well be the
+      // logger's own construction, and a fatal message that depends on the thing that broke is a
+      // message nobody reads. stdout stays reserved for the record stream (R-014).
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    },
+  );
 }

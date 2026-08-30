@@ -22,11 +22,18 @@ function validSection(): Record<string, unknown> {
     maxRateLimitWaitSeconds: 3900,
     maxQueueWaitSeconds: 1800,
     escalationChannel: { type: "github-issue", assignee: "a-human" },
+    pollIntervalSeconds: 60,
+    maxConcurrentReviews: 1,
   };
 }
 
+/** The shared, agent-agnostic section. Owned by nobody, validated by everybody (R-019). */
+function validHost(): Record<string, unknown> {
+  return { maxConcurrentAgents: 2 };
+}
+
 function validFile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return { reviewService: { ...validSection(), ...overrides } };
+  return { reviewService: { ...validSection(), ...overrides }, host: validHost() };
 }
 
 describe("required settings (FR-028)", () => {
@@ -35,7 +42,9 @@ describe("required settings (FR-028)", () => {
   });
 
   it("stops the run when the reviewService section is absent entirely", () => {
-    expect(() => validateSettings({ someOtherAgent: {} })).toThrow(SettingsError);
+    expect(() => validateSettings({ someOtherAgent: {}, host: validHost() })).toThrow(
+      SettingsError,
+    );
   });
 
   it.each(REQUIRED_SETTING_KEYS)("stops the run when %s is missing", (key) => {

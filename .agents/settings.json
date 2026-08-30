@@ -16,6 +16,11 @@
     "escalationChannel": {
       "type": "github-issue",
       "assignee": "OneHedgehog"
-    }
+    },
+    "pollIntervalSeconds": 60,
+    "maxConcurrentReviews": 1
+  },
+  "host": {
+    "maxConcurrentAgents": 2
   }
 }

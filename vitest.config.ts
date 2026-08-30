@@ -7,7 +7,7 @@ import { defineConfig } from "vitest/config";
  *
  * - unit         no model, no network
  * - integration  real schemas and the real statechart, stubbed platform edges
- * - e2e          a real private fixture repository, with only `ModelClient` substituted (R-015)
+ * - e2e          a real public fixture repository, with only `ModelClient` substituted (R-015)
  */
 export default defineConfig({
   test: {

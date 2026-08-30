@@ -16,6 +16,8 @@ import type { OwnThread } from "../review/reconcile.js";
 
 export interface ReviewThreadComment {
   readonly body: string;
+  /** When the comment was posted. FR-046 and R-018's clause (b) both compare against it. */
+  readonly createdAt: string;
   readonly authorLogin: string | null;
 }
 
@@ -51,7 +53,7 @@ export const REVIEW_THREADS_QUERY = `
             path
             line
             comments(first: 100) {
-              nodes { body author { login } }
+              nodes { body createdAt author { login } }
             }
           }
         }
@@ -91,17 +93,40 @@ export function ownThreads(threads: readonly ReviewThread[]): OwnThread[] {
     const marker = readOwnMarker(thread);
     if (marker === null) continue;
 
+    // The first comment is the finding itself; everything after it is a reply to it.
+    const replies = thread.comments.slice(1);
+
     own.push({
       threadId: thread.id,
       findingId: marker.id,
       role: marker.role,
       blocking: marker.blocking,
       isResolved: thread.isResolved,
-      replies: thread.comments.slice(1).map((comment) => comment.body),
+      replies: replies.map((comment) => comment.body),
+      // The newest reply, not every timestamp: both callers ask the same question — is there a
+      // reply *since* some moment — and the newest one answers it for the whole thread.
+      latestReplyAt: latestReplyAt(replies),
     });
   }
 
   return own;
+}
+
+/**
+ * The most recent reply's timestamp, or `null` when nobody has replied. Ordered by time rather
+ * than by position: GitHub returns comments in order today, and a thread whose last comment is not
+ * its newest would otherwise silently answer "no reply since" when there was one.
+ */
+function latestReplyAt(replies: readonly ReviewThreadComment[]): string | null {
+  let latest: string | null = null;
+
+  for (const reply of replies) {
+    if (latest === null || Date.parse(reply.createdAt) > Date.parse(latest)) {
+      latest = reply.createdAt;
+    }
+  }
+
+  return latest;
 }
 
 /** Reads the service's own threads on a pull request. */

@@ -110,12 +110,21 @@ export function requireModelCredential(
   return credential;
 }
 
-/** Reads the credential from the macOS keychain. Never logged, never returned to a caller twice. */
+/**
+ * Reads the credential from the macOS keychain. Never logged, never returned to a caller twice.
+ *
+ * `security`'s own stderr is discarded. An absent entry is the *ordinary* case on a machine using
+ * an `ant auth login` profile, and `security` announces it with
+ * `SecKeychainSearchCopyNext: The specified item could not be found in the keychain.` — which,
+ * inherited, lands in the daemon's log once per tick forever, looking like a fault when it is the
+ * expected resolution order working. The absence is already reported by returning `null`.
+ */
 export function macosKeychainReader(service: string): () => string | null {
   return () => {
     try {
       return execFileSync("security", ["find-generic-password", "-s", service, "-w"], {
         encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
       }).trim();
     } catch {
       return null;

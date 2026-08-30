@@ -8,17 +8,18 @@ import { measureQueueWait } from "../../../src/review/queue.js";
  * objection" Principle IV prohibits.
  */
 
-const CREATED = "2026-08-16T10:00:00.000Z";
+/** The tick that enqueued the review — where the wait is measured from under R-017. */
+const QUEUED = "2026-08-16T10:00:00.000Z";
 
 function at(secondsLater: number): string {
-  return new Date(Date.parse(CREATED) + secondsLater * 1000).toISOString();
+  return new Date(Date.parse(QUEUED) + secondsLater * 1000).toISOString();
 }
 
 describe("measureQueueWait (FR-041)", () => {
   it("measures the wait in seconds", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(90),
+      queuedAt: QUEUED,
+      startedAt: at(90),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -27,8 +28,8 @@ describe("measureQueueWait (FR-041)", () => {
 
   it("leaves the gate unreported below the threshold", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(90),
+      queuedAt: QUEUED,
+      startedAt: at(90),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -39,8 +40,8 @@ describe("measureQueueWait (FR-041)", () => {
 
   it("permits a wait exactly at the threshold", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(1800),
+      queuedAt: QUEUED,
+      startedAt: at(1800),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -49,8 +50,8 @@ describe("measureQueueWait (FR-041)", () => {
 
   it("fails and escalates past the threshold", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(1801),
+      queuedAt: QUEUED,
+      startedAt: at(1801),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -61,8 +62,8 @@ describe("measureQueueWait (FR-041)", () => {
 
   it("states both numbers in the reason", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(3600),
+      queuedAt: QUEUED,
+      startedAt: at(3600),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -70,10 +71,10 @@ describe("measureQueueWait (FR-041)", () => {
     expect(result.reason).toContain("1800");
   });
 
-  it("never reports a negative wait when the runner's clock is behind", () => {
+  it("never reports a negative wait when the clock is behind", () => {
     const result = measureQueueWait({
-      runCreatedAt: CREATED,
-      jobStartedAt: at(-30),
+      queuedAt: QUEUED,
+      startedAt: at(-30),
       maxQueueWaitSeconds: 1800,
     });
 
@@ -84,8 +85,8 @@ describe("measureQueueWait (FR-041)", () => {
   it("never reports the gate as success on this path", () => {
     for (const seconds of [0, 60, 1800, 1801, 100_000]) {
       const result = measureQueueWait({
-        runCreatedAt: CREATED,
-        jobStartedAt: at(seconds),
+        queuedAt: QUEUED,
+        startedAt: at(seconds),
         maxQueueWaitSeconds: 1800,
       });
 

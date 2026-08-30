@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The review service as a launchd user agent (research.md R-017, Principle IV).
+
+  A *user* agent under ~/Library/LaunchAgents, not a system daemon: the service runs as the
+  developer, reads their credentials from their home directory, and must never hold privileges the
+  person it works for does not.
+
+  RunAtLoad and KeepAlive together are what make the reconciling design pay off. The process is
+  restarted whenever it stops, and started whenever the machine comes back — and because the loop
+  reconciles state rather than consuming events, a restart loses nothing at all. The next tick
+  reads the same facts from GitHub and converges.
+
+  Replace WORKING_DIRECTORY and the --target argument before installing; this file is committed as
+  a template because the paths belong to a machine, not to the repository.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.agents.review</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>node</string>
+      <string>dist/daemon.js</string>
+      <string>--target</string>
+      <string>OneHedgehog/claude-code-agent-team</string>
+      <string>--checkout</string>
+      <string>REPLACE_WITH_ABSOLUTE_CHECKOUT_PATH</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>REPLACE_WITH_ABSOLUTE_REPOSITORY_PATH</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!--
+      Ten seconds between restarts. Without it a process that fails immediately — a missing private
+      key, say — is restarted in a tight loop, and the log that says why scrolls past faster than
+      anyone can read it.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!--
+      The record stream (R-014) and anything fatal, kept as files rather than piped anywhere: they
+      are the only account of what the service did while nobody was watching. Both may contain the
+      pull request titles and finding descriptions of a private repository; they never contain a
+      credential, which `observability/logger.ts` guarantees by redacting at the sink (FR-032).
+    -->
+    <key>StandardOutPath</key>
+    <string>/tmp/com.agents.review.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.agents.review.err.log</string>
+
+    <!--
+      launchd starts agents with a near-empty environment, so `node` would not be on PATH and the
+      SDKs would not find HOME. Both are named explicitly rather than inherited.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+      <key>HOME</key>
+      <string>REPLACE_WITH_HOME</string>
+    </dict>
+  </dict>
+</plist>

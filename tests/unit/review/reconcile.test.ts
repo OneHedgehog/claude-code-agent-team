@@ -29,6 +29,7 @@ function thread(source: Finding, overrides: Partial<OwnThread> = {}): OwnThread 
     blocking: source.blocking,
     isResolved: false,
     replies: [],
+    latestReplyAt: null,
     ...overrides,
   };
 }
