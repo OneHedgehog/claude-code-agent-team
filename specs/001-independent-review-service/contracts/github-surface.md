@@ -98,26 +98,33 @@ Ceilings observed rather than assumed: the installation's primary limit (5,000/h
 to 12,500) comes from the response headers, and the binding secondary ceiling — **80 content-creating
 requests per minute, 500 per hour** — is what `platformApiBudget` is configured against.
 
-## Workflow trigger and concurrency
+## Trigger and concurrency
 
-```yaml
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+**Amended 2026-08-20** — [research.md](../research.md) R-017 supersedes R-013. This section
+previously specified a `pull_request` workflow on `runs-on: [self-hosted, agents-host]`; there is no
+reviewer workflow now.
 
-concurrency:
-  group: review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+Work is discovered by reconciling state, not by receiving events. Each tick:
 
-jobs:
-  review:
-    runs-on: [self-hosted, agents-host]
+```text
+GET /repos/{owner}/{repo}/pulls?state=open      If-None-Match: <etag>   → 304 costs no rate limit
+  for each pull request, take head.sha
+GET /repos/{owner}/{repo}/commits/{sha}/check-runs?check_name=independent-review
+  zero check runs → review this revision
+  one or more    → already reviewed, skip
 ```
 
-`cancel-in-progress: true` implements FR-019: a run superseded by a newer push is cancelled rather
-than allowed to finish and report against a stale revision. The self-hosted runner's configured job
-slot count is the host-wide concurrency cap; reviewer jobs occupy an ordinary slot and are never
-exempted (FR-041, Principle VIII).
+That pair of reads is the whole trigger. It is also the whole persisted state: nothing local
+records what has been reviewed, so nothing local can disagree with GitHub (Principle VII).
+
+FR-019 is enforced explicitly rather than by the platform: before posting findings or the gate, a run
+re-reads the pull request's head SHA and discards its outcome if it has moved. `cancel-in-progress`
+previously did this implicitly, and the replacement is weaker in one stated respect — a superseded run
+is not interrupted mid-flight, so it may spend tokens on a revision whose outcome is already known to
+be unusable. The bound on that waste is one review, and the discard itself is unconditional.
+
+The host-wide concurrency cap (FR-041, Principle VIII) is the process's configured worker count.
+Reviewer work occupies an ordinary slot and is never exempted.
 
 ## Out of scope for this feature
 

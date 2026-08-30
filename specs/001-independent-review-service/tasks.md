@@ -5,19 +5,73 @@
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md),
 [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
 
-## Implementation status (as of 2026-08-15)
+## Implementation status (as of 2026-08-28)
 
-57 of 121 tasks complete: Phase 1, Phase 2 (except T032), and the non-e2e tasks of Phases 3–5.
-`npm run check` is green — build, lint, format, types, 355 unit tests, 52 integration tests.
+**136 of 136 tasks complete.** Every phase, every e2e scenario, and the two closing tasks.
+`npm run check` is green — build, lint, format, types, the diagram check, 648 unit tests, 88
+integration tests — and `npm run test:e2e` is green against the live fixture: 21 files, 48 tests,
+covering all 29 quickstart validation scenarios plus SC-013.
 
-Two blockers stop the rest, both recorded rather than worked around:
+**Phases 11 and 12 are complete.** The service can now be started: `src/composition.ts` is the one
+place concrete adapters are constructed, `src/daemon.ts` is the reconciling trigger, `src/cli.ts`
+reviews one named pull request by hand, `src/worktree.ts` provisions a checkout without executing
+anything it contains, and `src/host-lease.ts` enforces the host-wide agent cap on the filesystem
+where every agent can see it. `.github/workflows/review.yml` is deleted (T130).
+
+Verified 2026-08-24: `node dist/daemon.js --target OneHedgehog/claude-code-agent-team --checkout
+$PWD` authenticates the App, discovers its installation, lists the open pull requests, and selects
+nothing — which is correct, because there are none.
+
+**T032 is done, and the fixture is fully configured (2026-08-28).** The harness under
+`tests/e2e/harness/` composes the real service against the fixture with `ScriptedModelClient` as the
+only substitution. `npm run test:e2e` passes 7/7: a pull request opened as the authoring identity, a
+real review run against it, the gate reported by the App and read back, a gate report from the
+authoring identity refused `403`, review threads and escalation issues read, a revision pushed, and
+teardown verified.
+
+**The e2e suite is complete (2026-08-28).** `independent-review` is a required check on the
+fixture's `main`, and `unprotected-base` remains deliberately unprotected for scenario 26. All 29
+validation scenarios were run against the fixture and pass; the per-scenario record is in
+[docs/independent-review-service.md](../../docs/independent-review-service.md#validation-scenarios),
+because the document records what is true now and this file records what was intended
+(Principle IX).
+
+**Running them changed the code three times, which is the argument for the layer.** Scenario 18
+(T103) found a real defect: the self-review refusal compared a pull request's author against the
+*repository's* name rather than the App's own login, so FR-004's check silently never fired and the
+service reviewed a pull request it had authored itself. Scenario 17 (T090) found FR-040's
+pause-and-resume had a module and a settings pair that nothing ever called. Scenario 25 (T091) found
+FR-041's queue wait was re-stamped every tick, so its configured maximum was unreachable however
+saturated the host. Each is fixed and pinned at a cheaper layer as well as end to end.
+
+**Amended 2026-08-20 — deployment topology.** [research.md](research.md) R-017 supersedes R-013: the
+service is a local reconciling process, not a workflow on a self-hosted runner. See
+[Phase 11](#phase-11-deployment-topology-r-017) for the nine tasks this adds, T122–T130 — two of
+which close a gap that predates the amendment: nothing in Phases 1–10 ever built a composition root.
+
+**Amended again 2026-08-20 — cross-artifact analysis.** Analysing that amendment against the spec
+found that R-017's trigger could not reach FR-044, FR-045 or FR-046, and that its concurrency cap did
+not satisfy FR-041 or Principle VIII. [research.md](research.md) R-018 and R-019 correct both. T124
+and T128 are amended in place; [Phase 12](#phase-12-cross-artifact-analysis-remediation) carries the
+six tasks that remain, T131–T136. **T132 is a new prerequisite of T128** — the daemon cannot take a
+host lease that does not exist.
+
+Task IDs are never reused, renumbered, or deleted — they are cited from commit messages and code
+comments, and Principle VII's traceability depends on them resolving. A task whose artifact a later
+task removes stays `[X]` and is annotated, because it *was* done; see T101.
+
+**Nothing is blocked.** The table below is kept as the record of what was blocked and when it
+cleared, not as a list of outstanding work.
 
 | Blocked | Tasks | Why |
 |---|---|---|
-| **Every `tests/e2e/**` task** | T032, T035–T037, T049–T050, T059–T062, T070–T072, T084–T091, T103, T108–T110, T116, T119, T121 (28) | The GitHub App, the private fixture repository, and the self-hosted runner are Human prerequisites below, and none exists yet. A test that cannot be observed failing does not satisfy Principle II. |
-| **The merge gate** | T092, T093 (2) | The target repository is private on GitHub Free, so branch protection returns `403 Upgrade to GitHub Pro…`. Built as FR-051 specifies, the service would refuse every review permanently. See [CLAUDE.md](../../CLAUDE.md). |
+| ~~**Every `tests/e2e/**` scenario**~~ | ~~T035–T037, T049–T050, T059–T062, T070–T072, T084–T091, T103, T108–T110, T116, T119, T121~~ (27) | **Unblocked 2026-08-28.** The fixture's `main` now requires `independent-review`; the harness (T032) passes 7/7 against it. These are ordinary work now, held only by the exclusive-resource rule below. |
+| ~~**T120**~~ | ~~T120~~ | **Written 2026-08-28.** The description states the irreducibility justification Principle X requires, the spec and traceability links, and why `.mcp.json` rides along despite tracing to no spec. |
+| ~~**The merge gate**~~ | ~~T092, T093~~ | **Resolved 2026-08-18.** The target repository is public, `/branches/main/protection` reaches the feature, and both tasks are complete. Configuring the gate remains a human step. |
 
-The remaining 34 tasks — Phase 6, Phase 7 except the merge gate, Phases 8–10 — are unblocked.
+~~The 9 tasks of Phase 11 and the 4 open tasks of Phase 12 are unblocked and are the critical
+path~~ — **all complete 2026-08-24.** The critical path is now entirely outside the code: the
+fixture repository, and branch protection on the target's default branch.
 
 ---
 
@@ -47,26 +101,37 @@ conflicting with everything and runs alone.**
 
 | Resource | Needed by | Why |
 |---|---|---|
-| `fixture-repo` (private GitHub fixture repository) | Every `tests/e2e/**` task | Concurrent runs would collide on pull request state |
+| `fixture-repo` ([`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad), public) | Every `tests/e2e/**` task | Concurrent runs would collide on pull request state |
 | `github-quota` (installation API allowance) | Every `tests/e2e/**` task | Shared secondary rate limit, 500 content-creating requests/hour |
-| `runner-slot` | Every `tests/e2e/**` task | Counts against the host-wide concurrency cap like any agent job |
+| `review-slot` | Every `tests/e2e/**` task | Takes a lease from the host-wide cap like any agent job (R-019). Named `runner-slot` before R-017; there is no runner |
 
 E2E tasks are therefore **never** marked `[P]` with each other, regardless of file footprint.
 
 ## Human prerequisites (out-of-band, not agent tasks)
 
 The spec places these outside its own scope — an identity that can provision itself or write its own
-branch protection can remove its own gate. They are listed here because they gate real tasks, and
-because the repository currently has **no commits, no remote, and no App installed**.
+branch protection can remove its own gate. They are listed here because they gate real tasks.
+
+**Status as of 2026-08-20**: the target repository exists and is public, `origin` is wired, the App
+is created and installed, and the model credential resolves from an `ant auth login` profile. What
+remains outstanding is the **fixture repository** and **branch protection on the target's default
+branch** — which is why every `tests/e2e/**` task is still blocked while nothing else is.
+
+**Amended 2026-08-27.** The fixture repository exists, is public, is seeded, has the App installed,
+and carries both base branches. Visibility is settled — public, because branch protection is
+unavailable on a private repository on GitHub Free, and most scenarios need the gate to *be*
+required; every "private fixture" in the artefacts was corrected to match. **Complete as of 2026-08-28.** `independent-review` is a required status check on the fixture's
+`main`, and T032's smoke check was observed passing against it. No human prerequisite now blocks
+any task.
 
 | Prerequisite | Blocks | Notes |
 |---|---|---|
-| Target repository created on GitHub | T010 and every push | This working tree has no `origin` |
-| **Private fixture repository** created | T032 and every `tests/e2e/**` task | Cannot be the target repo: scenario 26 needs a branch where the gate is deliberately not required ([quickstart.md](quickstart.md) line 23, R-015) |
-| **GitHub App created and installed** on both repos, permission set per [contracts/github-surface.md](contracts/github-surface.md), private key in the runner's environment or keychain | Every `tests/e2e/**` task | Only a GitHub App can create a check run; no PAT can substitute at any scope |
-| Branch protection on the target's default branch requiring the gate | Real operation, and T084's negative case | The service verifies this (FR-051) and never writes it |
-| Self-hosted runner registered, job slot count set to the host-wide concurrency cap | T101 and every `tests/e2e/**` task | Reviewer jobs take an ordinary slot (FR-041, Principle VIII) |
-| `ANTHROPIC_API_KEY` in the runner's local environment or keychain, never in Actions secrets | Production runs only — e2e uses the scripted double | FR-032 |
+| ~~Target repository created on GitHub~~ | ~~T010 and every push~~ | **Done.** Public, `origin` wired over SSH |
+| ~~**Fixture repository** created, seeded, App installed, branches in place, **gate required**~~ | ~~T032 and every `tests/e2e/**` task~~ | **Done in full 2026-08-28**: [`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad), public, seeded, installation `155031737`, branches `main` and `unprotected-base`, and `main`'s `required_status_checks.contexts` now carries `independent-review` (prerequisite 6d). Cannot be the target repo: scenario 26 needs a branch where the gate is deliberately not required ([quickstart.md](quickstart.md) line 23, R-015) |
+| ~~**GitHub App created and installed**~~ on the target, permission set per [contracts/github-surface.md](contracts/github-surface.md), private key on the developer machine | Every `tests/e2e/**` task | **Done for the target 2026-08-18**; the *fixture* installation waits on the fixture repository existing. Only a GitHub App can create a check run; no PAT can substitute at any scope |
+| Branch protection on the target's default branch requiring the gate | Real operation, and T084's negative case | The service verifies this (FR-051) and never writes it. **Partially done 2026-08-24**: `main` is protected, but `required_status_checks` is empty, so `independent-review` is still not required |
+| ~~Self-hosted runner registered~~ | ~~T101~~ | **Removed 2026-08-20 (R-017).** No Actions runner is registered. The host-wide cap is `host.maxConcurrentAgents`, enforced by the lease T132 builds and configured in settings by T128 (R-019) — configuration, not a human prerequisite |
+| Model credential on the developer machine, never in Actions secrets — an `ant auth login` profile under `~/.config/anthropic/` (preferred) or `ANTHROPIC_API_KEY` in the environment or keychain | Production runs only — e2e uses the scripted double | FR-032, and the 2026-08-17 spec addendum |
 | Authoring PAT, fine-grained, scoped to the two repositories, **no Checks and no Administration on the target** | Agent-driven pushes | Administration write on the *fixture* is legitimate — its protection state is the test fixture |
 
 **Everything through T031 needs none of these.** Phases 1 and 2 are local TypeScript plus one push,
@@ -135,10 +200,10 @@ e2e task drives.
 - [X] T029 Implement ledger reconstruction from check-run outputs in `src/ledger/reconstruct.ts` (FR-038) — depends on T028
 - [X] T030 Declare the review-run statechart — every state and guard from [data-model.md](data-model.md), `checkingPrerequisites` first and the empty-diff exit on `checkingSize` — in `src/review/machine.ts` (Principle VII)
 - [X] T031 Implement the CLI entry point parsing `--target`, `--checkout`, `--pull-request` in `src/cli.ts` (FR-026, FR-027) — depends on T022, T023, T030
-- [ ] T032 Implement the end-to-end harness in `tests/e2e/harness/` — fixture-repository client, branch and pull request creation, pushing a revision, polling the check run to a terminal state, reading review threads and escalation issues, seeding the fixtures scenarios 11, 12, 15, 17, 19, and 26 need, and teardown — so every later e2e task drives the real flow with only `ScriptedModelClient` substituted (R-015, Principle II, Principle V baseline). **Requires the App installation and the fixture repository** — see Human prerequisites
+- [X] T032 Implement the end-to-end harness in `tests/e2e/harness/` — fixture-repository client, branch and pull request creation, pushing a revision, polling the check run to a terminal state, reading review threads and escalation issues, seeding the fixtures scenarios 11, 12, 15, 17, 19, and 26 need, and teardown — so every later e2e task drives the real flow with only `ScriptedModelClient` substituted (R-015, Principle II, Principle V baseline). **Requires the App installation and the fixture repository** — see Human prerequisites. **Done 2026-08-27**: `environment.ts` (preflight), `fixture-repository.ts` (two identities, Git Data API revisions, gate polling, threads, escalations, teardown), `review-run.ts` (`runReview` and `runDaemonUntil`, the model the only substitution), `seeds.ts` (scenarios 11, 12, 14, 15, 17, 24, 26), and the harness's own `smoke.e2e.ts`. **Observed passing 2026-08-28**, once `independent-review` became a required check on the fixture's `main`: all seven smoke assertions green in 20s against the real fixture, and teardown leaves it with only `main` and `unprotected-base`
 
 **Footprints**: T023 depends on T008 and T022; T029 on T028; T031 on T022, T023, T030. T032 writes
-`tests/e2e/harness/**` only, but holds `fixture-repo`, `github-quota`, and `runner-slot` while its own
+`tests/e2e/harness/**` only, but holds `fixture-repo`, `github-quota`, and `review-slot` while its own
 smoke check runs. All other implementation tasks are disjoint.
 
 **Checkpoint**: Foundation ready — user stories can begin, in parallel if staffed. **T011–T031 need no
@@ -158,9 +223,9 @@ check run whose conclusion matches them — with a scripted model double and no 
 
 - [X] T033 [P] [US1] Unit tests for verdict aggregation, missing-verdict-as-failure, and gate conclusion mapping in `tests/unit/review/gate.test.ts` (FR-006, FR-007, FR-008, FR-021)
 - [X] T034 [P] [US1] Unit tests for role precedence, contradiction recording, and the equal-precedence disagreement path — unreachable end-to-end in version one, so asserted here (FR-048, FR-049) — in `tests/unit/review/precedence.test.ts`
-- [ ] T035 [US1] E2E test: clean pull request yields two approving verdicts and a `success` check run, in `tests/e2e/gating-verdict.e2e.ts` — quickstart scenario 1 (SC-001)
-- [ ] T036 [US1] E2E test: the security reviewer blocks what the implementation reviewer accepts — the security finding stands, the gate reports `failure`, the contradiction is recorded, and **no** disagreement escalation is raised, in `tests/e2e/gating-verdict.e2e.ts` — quickstart scenario 20 (FR-048, SC-023)
-- [ ] T037 [US1] E2E test: an authoring identity attempting to report the gate is refused — asserting the refusal is **structural**, since GitHub accepts check-run writes only from an App installation and rejects any user token regardless of its scopes, in `tests/e2e/gate-identity.e2e.ts` — quickstart scenario 19 (FR-022, SC-007)
+- [X] T035 [US1] E2E test: clean pull request yields two approving verdicts and a `success` check run, in `tests/e2e/gating-verdict.e2e.ts` — quickstart scenario 1 (SC-001)
+- [X] T036 [US1] E2E test: the security reviewer blocks what the implementation reviewer accepts — the security finding stands, the gate reports `failure`, the contradiction is recorded, and **no** disagreement escalation is raised, in `tests/e2e/gating-verdict.e2e.ts` — quickstart scenario 20 (FR-048, SC-023)
+- [X] T037 [US1] E2E test: an authoring identity attempting to report the gate is refused — asserting the refusal is **structural**, since GitHub accepts check-run writes only from an App installation and rejects any user token regardless of its scopes, in `tests/e2e/gate-identity.e2e.ts` — quickstart scenario 19 (FR-022, SC-007)
 
 ### Implementation
 
@@ -174,7 +239,7 @@ check run whose conclusion matches them — with a scripted model double and no 
 - [X] T045 [US1] Wire the `reviewing → reportingGate` path through the statechart in `src/review/machine.ts` — depends on T044
 
 **Footprints**: T035 and T036 share `tests/e2e/gating-verdict.e2e.ts` and MUST be serialized. All e2e
-tasks hold `fixture-repo`, `github-quota`, and `runner-slot` — never parallel with each other or with
+tasks hold `fixture-repo`, `github-quota`, and `review-slot` — never parallel with each other or with
 any other phase's e2e task. T045 writes `src/review/machine.ts`, shared with T030 and later phases.
 
 **Checkpoint**: A pull request is gated end to end. This is the MVP.
@@ -194,8 +259,8 @@ severity-carrying comment anchored to the introducing line and a request-changes
 - [X] T046 [P] [US2] Unit tests for finding fingerprints and severity-to-blocking derivation against the configured threshold, evaluated once at creation, in `tests/unit/review/findings.test.ts` (FR-011, FR-012, FR-013)
 - [X] T047 [P] [US2] Unit tests for the diff-location resolver, including the not-in-diff fallback that records at pull request level rather than dropping, in `tests/unit/review/locations.test.ts` (FR-010, FR-014)
 - [X] T048 [P] [US2] Unit tests for the Anthropic adapter in `tests/unit/model/anthropic.test.ts`: credentials read from the local environment or keychain and **never** from Actions secrets, never logged and never placed in a prompt, `usage` reported on every response including error paths, and output consumed only through its schema (FR-031, FR-032, FR-036)
-- [ ] T049 [US2] E2E test: hardcoded credential yields a blocking anchored finding and request-changes, in `tests/e2e/findings.e2e.ts` — quickstart scenario 2 (SC-003)
-- [ ] T050 [US2] E2E test: a finding outside the diff is recorded at pull request level rather than dropped, in `tests/e2e/findings.e2e.ts` (FR-014)
+- [X] T049 [US2] E2E test: hardcoded credential yields a blocking anchored finding and request-changes, in `tests/e2e/findings.e2e.ts` — quickstart scenario 2 (SC-003)
+- [X] T050 [US2] E2E test: a finding outside the diff is recorded at pull request level rather than dropped, in `tests/e2e/findings.e2e.ts` (FR-014)
 
 ### Implementation
 
@@ -227,10 +292,10 @@ case that warrants one.
 - [X] T056 [P] [US3] Unit tests for excluded-path determination in `tests/unit/review/excluded-paths.test.ts`: the set is git-reported binary **plus** `excludedPathPatterns` and nothing else; no generated-file heuristic fires; a path resembling build output but not declared is **not** excluded; the resolved list is exposed for recording (FR-053)
 - [X] T057 [P] [US3] Unit tests for the scope-minimality rule across its declared categories — a refactor of untouched code, an opportunistic rename, formatting of untouched lines, a dependency change the feature does not require, and commented-out or dead code — each a blocking finding naming the content, in `tests/unit/review/rules/minimality.test.ts` (FR-042)
 - [X] T058 [P] [US3] Unit tests for the changed-line counter measured with the excluded set removed, and the `maxPullRequestSize` check with its description-justification escape clearing that finding and only that finding, in `tests/unit/review/rules/size.test.ts` (FR-043)
-- [ ] T059 [US3] E2E test: behavior change with no `docs/` update yields a blocking finding, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenario 3 (SC-004)
-- [ ] T060 [US3] E2E test: unrelated refactor yields a blocking minimality finding, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenario 4 (FR-042, SC-018)
-- [ ] T061 [US3] E2E test: oversized pull request blocks without a justification and passes the size check with one, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenarios 5 and 6 (FR-043)
-- [ ] T062 [US3] E2E test: a diff touching a declared excluded path and a git-binary file — both excluded from anchoring and from the changed-line count, neither blocking on its own, the excluded list recorded and its count in the check-run output, in `tests/e2e/excluded-paths.e2e.ts` — quickstart scenario 29 (FR-053)
+- [X] T059 [US3] E2E test: behavior change with no `docs/` update yields a blocking finding, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenario 3 (SC-004)
+- [X] T060 [US3] E2E test: unrelated refactor yields a blocking minimality finding, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenario 4 (FR-042, SC-018)
+- [X] T061 [US3] E2E test: oversized pull request blocks without a justification and passes the size check with one, in `tests/e2e/constitutional-rules.e2e.ts` — quickstart scenarios 5 and 6 (FR-043)
+- [X] T062 [US3] E2E test: a diff touching a declared excluded path and a git-binary file — both excluded from anchoring and from the changed-line count, neither blocking on its own, the excluded list recorded and its count in the check-run output, in `tests/e2e/excluded-paths.e2e.ts` — quickstart scenario 29 (FR-053)
 
 ### Implementation
 
@@ -260,9 +325,9 @@ success and a fresh review runs; then fix one finding, leave one standing, and a
 
 - [X] T068 [P] [US4] Unit tests for reconciliation in `tests/unit/review/reconcile.test.ts` — resolve fixed, leave standing open without reposting, add new; and the FR-015 limits: a finding that still stands is **never** resolved, a finding authored by anyone else is **never** resolved, and nothing is resolved merely for being old (FR-015, FR-039)
 - [X] T069 [P] [US4] Unit tests for reply judgement and waiver-request creation — rejected justification leaves the finding blocking, accepted justification records a waiver rather than a fix and is never resolved by reconciliation — in `tests/unit/review/replies.test.ts` (FR-044, FR-045)
-- [ ] T070 [US4] E2E test: a push after approval leaves the gate no longer reporting success and triggers a fresh full-diff review, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 7 (FR-017, FR-018, SC-005)
-- [ ] T071 [US4] E2E test: re-review resolves the fixed finding, leaves the standing one open unreposted, adds the new one, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 8 (FR-039, SC-015)
-- [ ] T072 [US4] E2E test: rejected justification keeps the finding blocking; accepted justification records a waiver request, escalates, and does not resolve or pass, in `tests/e2e/waivers.e2e.ts` — quickstart scenarios 9 and 10 (FR-044, FR-045, SC-019)
+- [X] T070 [US4] E2E test: a push after approval leaves the gate no longer reporting success and triggers a fresh full-diff review, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 7 (FR-017, FR-018, SC-005)
+- [X] T071 [US4] E2E test: re-review resolves the fixed finding, leaves the standing one open unreposted, adds the new one, in `tests/e2e/staleness.e2e.ts` — quickstart scenario 8 (FR-039, SC-015)
+- [X] T072 [US4] E2E test: rejected justification keeps the finding blocking; accepted justification records a waiver request, escalates, and does not resolve or pass, in `tests/e2e/waivers.e2e.ts` — quickstart scenarios 9 and 10 (FR-044, FR-045, SC-019)
 
 ### Implementation
 
@@ -296,14 +361,14 @@ approving verdict in every case.
 - [X] T081 [P] [US5] Unit tests for the reviewable-size gate spending nothing in `tests/unit/review/rules/reviewable-size.test.ts` (FR-037)
 - [X] T082 [P] [US5] Unit tests asserting no code path yields `neutral`, `skipped`, or `cancelled`, and that every `failure` carries a reason, in `tests/unit/review/gate-conclusions.test.ts` (FR-023, FR-024)
 - [X] T083 [P] [US5] Unit tests for escalation in `tests/unit/observability/escalate.test.ts`: every escalation both notifies through the configured channel **and** states its reason on the pull request, neither substituted for the other, and a recurring cause on the same pull request updates its issue rather than duplicating it (FR-035, R-012)
-- [ ] T084 [US5] E2E test: the merge gate absent from the base branch's required checks, and separately a missing installation permission — each spends zero tokens, records no verdict, fails the gate naming the missing prerequisite, and escalates, in `tests/e2e/prerequisites.e2e.ts` — quickstart scenario 26 (FR-051, SC-024)
-- [ ] T085 [US5] E2E test: a pull request whose diff is empty or whitespace-only is refused — zero spend, no verdict, gate `failure` stating there is nothing to review, escalation — in `tests/e2e/empty-diff.e2e.ts` — quickstart scenario 27 (FR-052)
-- [ ] T086 [US5] E2E test: missing model credentials and mid-run error each fail the gate with a reason and zero approving verdicts, in `tests/e2e/fail-closed.e2e.ts` — quickstart scenario 13 (FR-023, SC-002)
-- [ ] T087 [US5] E2E test: budget below requirement stops before spending, fails, escalates; reserve-only budget still runs the review, in `tests/e2e/budget.e2e.ts` — quickstart scenarios 14 and 15 (FR-031, FR-047, SC-009, SC-022)
-- [ ] T088 [US5] E2E test: oversized diff spends zero tokens, records no verdict, fails with a split reason, in `tests/e2e/fail-closed.e2e.ts` — quickstart scenario 16 (FR-037, SC-014)
-- [ ] T089 [US5] E2E test: no-progress round stops before re-reviewing and escalates; a retry after an unconcluded round proceeds, in `tests/e2e/progress.e2e.ts` — quickstart scenarios 11 and 12 (FR-020, FR-046, SC-020)
-- [ ] T090 [US5] E2E test: platform reserve pauses, notifies, leaves the gate unreported, resumes without reposting, in `tests/e2e/rate-limit.e2e.ts` — quickstart scenario 17 (FR-040, SC-016)
-- [ ] T091 [US5] E2E test: queue wait under the maximum leaves the gate unreported; over it notifies, fails, and escalates, in `tests/e2e/queue.e2e.ts` — quickstart scenarios 24 and 25 (FR-041, SC-017)
+- [X] T084 [US5] E2E test: the merge gate absent from the base branch's required checks, and separately a missing installation permission — each spends zero tokens, records no verdict, fails the gate naming the missing prerequisite, and escalates, in `tests/e2e/prerequisites.e2e.ts` — quickstart scenario 26 (FR-051, SC-024)
+- [X] T085 [US5] E2E test: a pull request whose diff is empty or whitespace-only is refused — zero spend, no verdict, gate `failure` stating there is nothing to review, escalation — in `tests/e2e/empty-diff.e2e.ts` — quickstart scenario 27 (FR-052)
+- [X] T086 [US5] E2E test: missing model credentials and mid-run error each fail the gate with a reason and zero approving verdicts, in `tests/e2e/fail-closed.e2e.ts` — quickstart scenario 13 (FR-023, SC-002)
+- [X] T087 [US5] E2E test: budget below requirement stops before spending, fails, escalates; reserve-only budget still runs the review, in `tests/e2e/budget.e2e.ts` — quickstart scenarios 14 and 15 (FR-031, FR-047, SC-009, SC-022)
+- [X] T088 [US5] E2E test: oversized diff spends zero tokens, records no verdict, fails with a split reason, in `tests/e2e/fail-closed.e2e.ts` — quickstart scenario 16 (FR-037, SC-014)
+- [X] T089 [US5] E2E test: no-progress round stops before re-reviewing and escalates; a retry after an unconcluded round proceeds, in `tests/e2e/progress.e2e.ts` — quickstart scenarios 11 and 12 (FR-020, FR-046, SC-020)
+- [X] T090 [US5] E2E test: platform reserve pauses, notifies, leaves the gate unreported, resumes without reposting, in `tests/e2e/rate-limit.e2e.ts` — quickstart scenario 17 (FR-040, SC-016)
+- [X] T091 [US5] E2E test: queue wait under the maximum leaves the gate unreported; over it notifies, fails, and escalates, in `tests/e2e/queue.e2e.ts` — quickstart scenarios 24 and 25 (FR-041, SC-017). **Amended 2026-08-20 (R-017)**: the wait is measured from the tick that enqueued the review to the review starting, not from a workflow run's `created_at`. Saturate the daemon's worker pool to produce the wait; there is no workflow run to read
 
 ### Implementation
 
@@ -316,7 +381,7 @@ approving verdict in every case.
 - [X] T098 [P] [US5] Implement queue-wait measurement and the escalation threshold in `src/review/queue.ts` (FR-041)
 - [X] T099 [US5] Implement escalation — the `NotificationChannel` interface, its GitHub-issue implementation, and the statement on the pull request that always accompanies it, neither substituted for the other — in `src/observability/escalate.ts` (FR-035) — depends on T026
 - [X] T100 [US5] Wire `checkingPrerequisites`, the empty-diff exit, fail-closed exits, `waitingForReset`, and `escalating` into `src/review/machine.ts` (FR-023, FR-051, FR-052) — depends on T093, T094, T096, T097, T098, T099
-- [X] T101 [US5] Create the reviewer workflow with the per-pull-request concurrency group and `cancel-in-progress: true` in `.github/workflows/review.yml` (FR-001, FR-019, FR-041)
+- [X] T101 [US5] Create the reviewer workflow with the per-pull-request concurrency group and `cancel-in-progress: true` in `.github/workflows/review.yml` (FR-001, FR-019, FR-041) — **superseded 2026-08-20 by T128 and T130 (R-017)**: the workflow was built as specified and is deleted without ever having run. It stays `[X]` because it was done; FR-001, FR-019 and FR-041 are re-satisfied by the daemon, and the tasks that do so name it
 
 **Footprints**: T086 and T088 share `tests/e2e/fail-closed.e2e.ts` and MUST be serialized. T100 writes
 `src/review/machine.ts` — serialize against T030, T045, T076. T097 depends on T063 from Phase 5 — the
@@ -338,7 +403,7 @@ verdict and a non-passing gate.
 ### Tests (write first, observe failing)
 
 - [X] T102 [P] [US6] Unit tests for author-versus-reviewing-identity comparison, including the negative case where another author does not trip the check, in `tests/unit/review/self-review.test.ts` (FR-004)
-- [ ] T103 [US6] E2E test: self-authored pull request records no approval, states the reason, escalates; another author does not trip the check, in `tests/e2e/self-review.e2e.ts` — quickstart scenario 18 (FR-004, SC-006)
+- [X] T103 [US6] E2E test: self-authored pull request records no approval, states the reason, escalates; another author does not trip the check, in `tests/e2e/self-review.e2e.ts` — quickstart scenario 18 (FR-004, SC-006)
 
 ### Implementation
 
@@ -364,9 +429,9 @@ report.
 
 - [X] T106 [P] [US7] Unit tests asserting every emitted record validates against `schemas/review-record.schema.json` and carries `runId`, with no bare prose on standard output, in `tests/unit/observability/records.test.ts` (FR-033, FR-034)
 - [X] T107 [P] [US7] Unit tests for the check-run output payload in `tests/unit/github/check-run-output.test.ts`: tokens consumed, budget remaining, the excluded-path count, the effective value of every optional setting, and the round-history fields the next round reads are all present (FR-031, FR-046, FR-053, FR-054)
-- [ ] T108 [US7] E2E test: run from an unrelated working directory resolves constitution, settings, and inspected paths through `--target`; a missing `--target` stops with an error, in `tests/e2e/addressing.e2e.ts` — quickstart scenario 23 (FR-026, FR-027, SC-012)
-- [ ] T109 [US7] E2E test: a settings file carrying a sibling agent's section, an unknown key inside `reviewService`, and no `modelEffort` — the sibling is ignored, the unknown own key stops the run, and the documented default is applied with its effective value reported, in `tests/e2e/settings.e2e.ts` — quickstart scenario 28 (FR-050, FR-054)
-- [ ] T110 [US7] E2E test: a concluded run reports tokens consumed and budget remaining, and is reconstructible from its records and the pull request alone, in `tests/e2e/accountability.e2e.ts` — quickstart scenario 22 (FR-033, FR-034, SC-008)
+- [X] T108 [US7] E2E test: run from an unrelated working directory resolves constitution, settings, and inspected paths through `--target`; a missing `--target` stops with an error, in `tests/e2e/addressing.e2e.ts` — quickstart scenario 23 (FR-026, FR-027, SC-012)
+- [X] T109 [US7] E2E test: a settings file carrying a sibling agent's section, an unknown key inside `reviewService`, and no `modelEffort` — the sibling is ignored, the unknown own key stops the run, and the documented default is applied with its effective value reported, in `tests/e2e/settings.e2e.ts` — quickstart scenario 28 (FR-050, FR-054)
+- [X] T110 [US7] E2E test: a concluded run reports tokens consumed and budget remaining, and is reconstructible from its records and the pull request alone, in `tests/e2e/accountability.e2e.ts` — quickstart scenario 22 (FR-033, FR-034, SC-008)
 
 ### Implementation
 
@@ -385,17 +450,119 @@ T112 writes two files shared with earlier phases — runs alone.
 - [X] T113 Generate the statechart diagram from `src/review/machine.ts` into `docs/independent-review-service.md` via a script in `scripts/generate-diagram.ts`, wired into `check` so the diagram cannot drift (Principle VII)
 - [X] T114 Write the feature document — what it does, how it works, how to run it, decisions and trade-offs, including both recorded least-privilege tensions and the human prerequisites above — in `docs/independent-review-service.md` (Principle IX) — depends on T113
 - [X] T115 [P] Add the lint rule failing any assertion on model-produced strings under `tests/e2e/` in `eslint.config.js` (FR-030, SC-010)
-- [ ] T116 Add the timed e2e case asserting a 1,000-changed-line diff concludes within 10 minutes in `tests/e2e/performance.e2e.ts`, stating in the test that the model boundary is substituted so the figure bounds harness overhead rather than model latency; the real-model figure is an eval outside the merge path (SC-013, Principle II)
+- [X] T116 Add the timed e2e case asserting a 1,000-changed-line diff concludes within 10 minutes in `tests/e2e/performance.e2e.ts`, stating in the test that the model boundary is substituted so the figure bounds harness overhead rather than model latency; the real-model figure is an eval outside the merge path (SC-013, Principle II)
 - [X] T117 [P] Add prompt-injection regression tests — diff, comment, and model-output content carrying instructions is never acted on — in `tests/unit/model/injection.test.ts` (FR-036)
 - [X] T118 [P] Add a credential-leak regression test asserting no record, comment, or prompt contains credential-shaped values in `tests/unit/observability/redaction.test.ts` (FR-032)
-- [ ] T119 Run all 29 quickstart validation scenarios against the fixture repository and record the results in `docs/independent-review-service.md` — the `specs/` record states intent at the time it was written and is not rewritten (Principle IX)
-- [ ] T120 Write the pull request description: the irreducibility justification for its size per Principle X and [plan.md](plan.md) Complexity Tracking, the spec and run identifier links (Principle VII), and — if `.mcp.json` is tracked — why agent tooling configuration rides along, since it traces to no spec and sits on the escalation list (FR-043, Principle V, Principle X)
-- [ ] T121 E2E test: every escalation path emits a notification through the configured channel **and** states its reason on the pull request, with neither substituted for the other, in `tests/e2e/escalation.e2e.ts` — quickstart scenario 21 (FR-035, SC-011, SC-021)
+- [X] T119 Run all 29 quickstart validation scenarios against the fixture repository and record the results in `docs/independent-review-service.md` — the `specs/` record states intent at the time it was written and is not rewritten (Principle IX)
+- [X] T120 Write the pull request description: the irreducibility justification for its size per Principle X and [plan.md](plan.md) Complexity Tracking, the spec and run identifier links (Principle VII), and — if `.mcp.json` is tracked — why agent tooling configuration rides along, since it traces to no spec and sits on the escalation list (FR-043, Principle V, Principle X)
+- [X] T121 E2E test: every escalation path emits a notification through the configured channel **and** states its reason on the pull request, with neither substituted for the other, in `tests/e2e/escalation.e2e.ts` — quickstart scenario 21 (FR-035, SC-011, SC-021)
 
 **Footprints**: T113, T114, and T119 all write `docs/independent-review-service.md` and MUST be
 serialized in that order. T115 extends `eslint.config.js` first created in T003 — safe, since Phase 1
 completes before Phase 10. T116, T119, and T121 hold all three exclusive resources and are serialized
 against each other and every other e2e task.
+
+---
+
+## Phase 11: Deployment topology (R-017)
+
+**Added 2026-08-20.** [research.md](research.md) R-017 supersedes R-013: the service is a long-lived
+local process that reconciles state, not a workflow on a self-hosted runner. No functional
+requirement changed — see the spec's 2026-08-20 addendum — so this phase re-satisfies FR-001, FR-019
+and FR-041 by a different mechanism rather than implementing anything new against them.
+
+Two of these tasks are not consequences of R-017 at all and are recorded as the gap they are: **no
+task in Phases 1–10 ever created a composition root or minted an installation token in TypeScript.**
+Every adapter was built behind an interface and nothing ever constructed one. `parseArgs` is never
+called, and `src/` contains no `@octokit` import. That gap predates this amendment and would have
+blocked real operation under R-013 identically.
+
+### Tests (write first, observe failing)
+
+- [X] T122 [P] Unit test: an installation token is minted from the App's private key and refreshed before it expires, never after a `401`; a key whose permissions are not `600` is refused, in `tests/unit/github/installation-token.test.ts` (FR-002, FR-022)
+- [X] T123 [P] Unit test: worktree provisioning creates a bare mirror, fetches the pull request head, adds a detached worktree at the requested SHA, and removes it on both success and failure; asserts that no command derived from the tree's own contents is ever executed, in `tests/unit/worktree.test.ts` (R-017)
+- [X] T124 Integration test: the reconciliation decision, **both clauses** ([research.md](research.md) R-018) — clause (a), a head SHA carrying no `independent-review` check run is selected and one already carrying it is skipped; clause (b), a SHA whose check run concluded `failure` with open blocking findings **is** selected when one of those findings carries a reply newer than that run's conclusion time, and is **not** selected when the newest reply predates it, when the run concluded `success`, or when its output lists no open blocking finding; the thread read is skipped entirely for pull requests the cheap conditions exclude (FR-040); an unchanged listing returns `304` and selects nothing; and a run whose head SHA moved during the review discards its outcome without posting findings or the gate, in `tests/integration/reconcile.test.ts` (FR-001, FR-019, FR-044, FR-046)
+
+### Implementation
+
+- [X] T125 Implement the installation-token provider in `src/github/auth.ts` — JWT from the private key at `~/.config/github-app/review-app.pem`, exchange at `/app/installations/{id}/access_tokens`, refresh before expiry — mirroring [`scripts/github-app-token.sh`](../../scripts/github-app-token.sh), which stays as the by-hand path (FR-002, FR-022) — depends on T122
+- [X] T126 Implement worktree provisioning in `src/worktree.ts` — bare mirror under `~/.cache/review-service/`, `git fetch` of the pull request head, detached worktree per review, removal afterwards (R-017) — depends on T123
+- [X] T127 Implement the composition root in `src/composition.ts` — the only place concrete adapters are constructed: Octokit-backed `CheckRunApi`, `ReviewsApi`, `ThreadsApi`, `BranchProtectionApi` and `EscalationSurfaces`, the model client resolved from `ModelCredential`, the logger, and the ledger — and wire `src/cli.ts` to it so one named pull request can be reviewed end to end from the command line (FR-026, FR-027) — depends on T125, T126
+- [X] T128 Implement the daemon in `src/daemon.ts` — the poll loop, **both predicate clauses** of [research.md](research.md) R-018, conditional requests with an `ETag` cache, bounded workers each holding a host lease from T132, and the FR-019 head-SHA re-read before posting. **Settings work, all of it required and none of it defaulted in code** (FR-028, FR-054, [data-model.md](data-model.md) OperatingSettings): add `pollIntervalSeconds` and `maxConcurrentReviews` to `reviewService` and the shared `host` section carrying `maxConcurrentAgents` — writing [contracts/settings.schema.json](contracts/settings.schema.json) **first** and republishing to `schemas/settings.schema.json`, so the contract stays the source and the copy stays a copy (T008's direction); teach `src/config/settings.ts` to validate the `host` section strictly alongside its own while still ignoring sibling agents' sections (FR-050); add the two cross-field invariants `maxConcurrentReviews ≤ host.maxConcurrentAgents` and `host.maxConcurrentAgents ≥ 1`; and add the three new keys to this repository's own `.agents/settings.json`, **without which the service stops on its own target repository**. Finally, rewire `src/review/queue.ts`, whose `queuedAt` still documents itself as "when the workflow run was created": under R-017 the wait runs from the enqueuing tick to the review holding both a worker and a host lease (FR-001, FR-019, FR-041, FR-050, FR-054, Principle VIII) — depends on T124, T127, **T132**
+- [X] T129 [P] Add the `launchd` user agent at `scripts/com.agents.review.plist` with `RunAtLoad` and `KeepAlive`, an `npm run daemon` script, and its install and uninstall steps in [quickstart.md](quickstart.md) (R-017, Principle IV) — depends on T128
+- [X] T130 Delete `.github/workflows/review.yml`, and update `docs/independent-review-service.md` — the topology, the removal of the fork-pull-request exclusion, and the human prerequisites table — in the same change (Principle IX) — depends on T128
+
+**Footprints**: T125 extends `src/github/auth.ts`, first created in Phase 2 — serialize against
+anything else touching it. T128 writes `contracts/settings.schema.json`, `schemas/settings.schema.json`,
+`.agents/settings.json`, `src/config/settings.ts` and `src/review/queue.ts`, all shared, and MUST be
+serialized against every other task touching settings — T008, T009, T013, T014, T023 and T098 own
+those files in earlier phases. T127 is the only
+task permitted to construct concrete adapters; a second task doing so is a merge conflict by
+construction. T129 and T130 touch disjoint files and may run in parallel once T128 lands. T130 writes
+`docs/independent-review-service.md` and serializes against T113, T114, and T119.
+
+**Ordering note**: T132 precedes T128, and T127 precedes both. T127 was the critical path. Until it
+existed the service could not run against a real pull request at all, which also made it what
+unblocks posting the first `independent-review` check run — and the classic branch-protection UI
+will not offer that context as a required check until it has seen one. **That step is now
+available**: opening one throwaway pull request and letting the daemon report on it is what makes
+the gate selectable in the branch-protection picker.
+
+**Recorded during T128**: the task asked for two cross-field invariants,
+`maxConcurrentReviews <= host.maxConcurrentAgents` and `host.maxConcurrentAgents >= 1`. Only the
+first is in `invariantProblems`. The second is not a cross-field question at all — JSON Schema
+expresses it natively, and it is `"minimum": 1` on the property, so a code check would be validation
+no input could reach. `acquireHostLease` additionally refuses a capacity below one, which is the
+defence in depth for a caller that never went through settings at all.
+
+**Recorded during T127**: `ReviewThreadComment` gained `createdAt` and `OwnThread` gained
+`latestReplyAt`. FR-046's forward-progress check and R-018's clause (b) both compare a reply against
+a round's conclusion time, and nothing in the tree carried a reply timestamp — the GraphQL query did
+not even select one. Neither requirement was reachable without it.
+
+**Recorded during T130**: deleting `review.yml` left dangling links and a stale prerequisite in
+`docs/prerequisites.md` and `docs/github-access.md`, and a stale comment in `ci.yml`. All three were
+corrected in the same change, because documentation describing behavior the code no longer has is
+the exact defect this service blocks pull requests for.
+
+---
+
+## Phase 12: Cross-artifact analysis remediation
+
+**Added 2026-08-20**, from analysing the R-017 amendment against the spec, the constitution, and the
+tree as built. Four of these six tasks close gaps the analysis found; two record work that shipped
+without a task at all, which is its own kind of gap — Principle VII's traceability depends on a
+commit's cited task ID resolving to something.
+
+The predicate correction itself is not here: it belongs to the daemon and its test, so T124 and T128
+are amended in place rather than shadowed by a second pair of tasks.
+
+### The host-wide cap (R-019) — precedes T128
+
+- [X] T131 [P] Unit tests for the host-wide agent lease in `tests/unit/host-lease.test.ts`: acquisition takes the lowest free slot; a full set of slots returns no lease rather than exceeding the cap; release frees the slot; a slot whose recorded PID is no longer live is reclaimed by the next acquirer; two acquirers racing for the last slot yield exactly one holder; and a lease is never reconstructed after the fact, unlike the ledger (FR-041, Principle VIII, [research.md](research.md) R-019)
+- [X] T132 Implement the host-wide agent lease in `src/host-lease.ts` — `open(O_CREAT | O_EXCL)` against `slot-01 … slot-NN` under `${XDG_STATE_HOME:-~/.local/state}/agents/slots/`, each file recording holder PID and start time, stale-slot reclamation by PID liveness, and release on both success and failure paths (FR-041, Principle VIII, R-019) — depends on T131. **T128 depends on this**: the daemon's workers acquire a lease each, and `maxConcurrentReviews` is a ceiling on the reviewer's share rather than the host's cap
+
+### Traceability for work that shipped without a task
+
+Both record what is already in the tree and are therefore `[X]`, annotated like T101. They exist so
+that the 2026-08-17 spec addendum has task IDs behind it, not to schedule anything.
+
+- [X] T133 **[Retroactive record]** Resolve the model credential to a `ModelCredential` carrying its `source` — `ant auth login` profile under `~/.config/anthropic/` (preferred, and carrying no key, because the SDK reads the profile itself), then `ANTHROPIC_API_KEY`, then keychain — in `src/model/anthropic.ts`, with `AnthropicModelClient` accepting a keyless profile credential while still rejecting a source that promises a key and supplies an empty one (FR-032, and the 2026-08-17 spec addendum). Shipped 2026-08-17 alongside T054; recorded here because no task described it
+- [X] T134 **[Retroactive record]** Extend startup prerequisite verification to the model credential — presence checked beside the FR-003 permission check and the FR-025 branch-protection check, so an absent credential fails with a stated reason and zero spend rather than a `401` mid-review — in `src/review/prerequisites.ts` (FR-032, FR-051, and the 2026-08-17 spec addendum). Shipped 2026-08-17 alongside T093; FR-051 names only permissions and branch protection, and this extends the same pre-spend discipline without altering what FR-051 requires
+
+### Coverage the analysis found thin
+
+- [X] T135 Integration test: the composition root constructs and wires every concrete adapter without throwing, and `cli.ts` reaches a review through it, in `tests/integration/composition.test.ts` (FR-026, FR-027) — depends on T127. Phase 11 named this gap precisely — "every adapter was built behind an interface and nothing ever constructed one" — and then shipped T127 with no test, so its recurrence would be as invisible as its first occurrence was
+- [X] T136 [P] Unit tests for revision binding in `tests/unit/review/gate-revision.test.ts`: a verdict carries the exact revision its role examined and a verdict bound to any other revision is not counted toward the gate (FR-009); an approving verdict bound to a superseded revision does not satisfy the gate after a push, and the gate derived for the new head starts from no verdicts rather than from the old ones (FR-018). Both requirements were covered only by `tests/e2e/staleness.e2e.ts` and an implementation task, so neither is currently observable while the fixture repository is missing
+
+**Footprints**: T131 and T132 write `tests/unit/host-lease.test.ts` and `src/host-lease.ts`, new files
+touched by nothing else. T135 writes `tests/integration/composition.test.ts`, new. T136 writes
+`tests/unit/review/gate-revision.test.ts`, new — deliberately a separate file from T033's
+`gate.test.ts`, which is complete, so that neither task's record is rewritten. T133 and T134 write
+nothing; the code they describe is already merged.
+
+**Checkpoint**: the cap counts every agent on the machine rather than one process's own workers; a
+reply reaches the reviewer without a commit; and every line of shipped code resolves to a task ID.
 
 ---
 
@@ -413,6 +580,8 @@ against each other and every other e2e task.
 - **US6 (Phase 8)**: depends on Foundational only — the most independent story
 - **US7 (Phase 9)**: depends on Foundational; T111 touches US1's and US5's check-run module
 - **Polish (Phase 10)**: depends on every story intended for this pull request
+- **Deployment topology (Phase 11)**: depends on Foundational for the adapters it constructs; T127 before T128; **T132 (Phase 12) before T128**
+- **Remediation (Phase 12)**: T131 before T132, and T132 before T128 — so the two lease tasks run *inside* Phase 11's window rather than after it. T135 depends on T127. T136 depends on nothing incomplete and may run at any point
 
 ### The GitHub boundary
 
@@ -420,6 +589,12 @@ T001–T031 need no GitHub access beyond one push to a feature branch. **T032 on
 installation and the fixture repository** (see Human prerequisites), because every e2e assertion lands
 on a check-run conclusion and only an App can create one. Build the foundation first; provisioning can
 happen in parallel with it.
+
+### The one dependency that runs backwards through the phase numbering
+
+Phase 12 was added after Phase 11 and contains one of its prerequisites: T131 → T132 → T128. Task IDs
+record when a task was written, never when it runs, and this is the clearest case of that in the file.
+Scheduling by number here would build a daemon whose workers have no cap to draw from.
 
 ### The two genuine cross-story dependencies
 
@@ -522,9 +697,11 @@ task's own gates first.
 ## Notes
 
 - `[P]` means disjoint file footprint and no incomplete dependency — never "probably fine"
-- E2E tasks hold `fixture-repo`, `github-quota`, and `runner-slot`, so they are serialized regardless of files
+- E2E tasks hold `fixture-repo`, `github-quota`, and `review-slot`, so they are serialized regardless of files
 - `src/review/machine.ts` is the most-contended file: T030, T045, T076, T100, T105, T112 all write it
 - `src/github/check-run.ts` is second: T038, T095 (reads), T111 all touch it
+- Settings are third, and T128 touches all four places at once: `contracts/settings.schema.json` (T008), `schemas/settings.schema.json` (T008), `.agents/settings.json` (T009), `src/config/settings.ts` (T023). The contract is written first and the published copy follows it, never the reverse
+- Task numbering is chronological, not topological — see T131 → T132 → T128
 - A test task is not done until its failure has been observed (Principle II)
 - Commit after each task; each task branch merges into the feature branch only after its own gates pass
 - Every quickstart scenario 1–29 has an owning e2e task: 1/19/20 → US1, 2 → US2, 3–6/29 → US3, 7–10 → US4, 11–17/24–27 → US5, 18 → US6, 22/23/28 → US7, 21 → Polish

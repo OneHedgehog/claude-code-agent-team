@@ -37,6 +37,16 @@ typo in a budget or a threshold is indistinguishable from a setting that was nev
 whole file strictly would reject the settings a later agent adds, failing the gate on a configuration
 error and leaving nothing able to merge.
 
+**One section is shared rather than owned** ([research.md](research.md) R-019). The host-wide
+concurrency cap belongs to no single agent, so it sits in a top-level `host` section that every
+agent reads and that this service validates **strictly**, alongside its own. This is not an
+exception to FR-050 so much as the part of it that had nowhere to go: sibling *agents'* sections are
+still ignored rather than rejected, and `host` is not one of them.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `host.maxConcurrentAgents` | `integer ≥ 1` | Live agent jobs permitted on the machine at once, across every feature, task, CI and reviewer job (FR-041, Principle VIII). Enforced by the lease in R-019, not by any one process counting its own workers |
+
 **Required settings** — a missing or invalid value stops the run (FR-028, FR-054):
 
 | Field | Type | Meaning |
@@ -53,6 +63,8 @@ error and leaving nothing able to merge.
 | `platformApiReserve` | `integer ≥ 0` | Stop-and-wait threshold (FR-040) |
 | `maxRateLimitWaitSeconds` | `integer ≥ 1` | Past this, fail and escalate (FR-040) |
 | `maxQueueWaitSeconds` | `integer ≥ 1` | Past this, fail and escalate (FR-041) |
+| `maxConcurrentReviews` | `integer ≥ 1` | Ceiling on the reviewer's share of `host.maxConcurrentAgents`; a review holds a worker *and* a host lease (FR-041, R-017, R-019) |
+| `pollIntervalSeconds` | `integer ≥ 1` | Seconds between reconciliation ticks (R-017, R-018) |
 | `escalationChannel` | `ChannelConfig` | Transport plus its configuration (FR-035) |
 
 **Optional settings** — absence is filled from the documented default in the schema rather than
@@ -65,13 +77,18 @@ value nobody can see (FR-054):
 | `escalationChannel.label` | `string` | `"escalation"` | Label applied to the escalation issue |
 
 Every budget, reserve, threshold, and cap is required; review depth is the one lever a repository may
-leave unset before its first review.
+leave unset before its first review. That rule is what classifies the two settings R-017 and R-018
+add: `maxConcurrentReviews` is a cap and `pollIntervalSeconds` is the interval every trigger depends
+on, so both are required, and neither carries an in-code default (FR-028, FR-054).
 
 **Invariants**, enforced in code immediately after schema validation because JSON Schema cannot
 express them, with the same stop-the-run consequence as a missing required key:
 `reviewerTokenReserve < tokenBudget`; `platformApiReserve < platformApiBudget`;
 `maxReviewableDiffSize > maxPullRequestSize` (the reviewability cap sits above the discipline cap —
 otherwise FR-043 could never fire).
+Two more come with R-019: `maxConcurrentReviews ≤ host.maxConcurrentAgents` (a reviewer share
+above the host cap is a setting that can never be honoured), and `host.maxConcurrentAgents ≥ 1`
+(a cap of zero is a machine that runs nothing while reporting nothing).
 
 ---
 

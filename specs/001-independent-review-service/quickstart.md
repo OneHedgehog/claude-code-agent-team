@@ -15,12 +15,16 @@ manage them (spec Assumptions, Dependencies):
 
 1. **A GitHub App** installed on the target repository with the permissions in
    [contracts/github-surface.md](contracts/github-surface.md), distinct from every authoring identity.
-2. **A self-hosted runner** on the developer machine, labelled `self-hosted,agents-host`, with its job
-   slot count set to the host-wide concurrency cap (Principle VIII).
+2. **The service installed as a local process** on the developer machine — under `launchd` on macOS —
+   with `host.maxConcurrentAgents` set to the host-wide concurrency cap and enforced by a
+   filesystem lease every agent takes (Principle VIII, R-017, R-019). No GitHub Actions runner is
+   registered. See **Install the service** below.
 3. **Branch protection** on the default branch requiring the reviewer check run.
-4. **Local credentials** on the runner host — `ANTHROPIC_API_KEY` in the environment or OS keychain,
-   and the App's private key. Never in Actions secrets (FR-032).
-5. **A private fixture repository** with the same App installed, for the end-to-end suite (R-015).
+4. **Local credentials** on that machine — an `ant auth login` profile under `~/.config/anthropic/`
+   (preferred), or `ANTHROPIC_API_KEY` in the environment or OS keychain; and the App's private key.
+   Never in Actions secrets (FR-032).
+5. **A public fixture repository** with the same App installed, for the end-to-end suite (R-015) —
+   [`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad).
 
 ## Setup
 
@@ -59,10 +63,21 @@ applied. Sibling sections are never validated and never rejected.
     "platformApiReserve": 50,
     "maxRateLimitWaitSeconds": 3900,
     "maxQueueWaitSeconds": 1800,
-    "escalationChannel": { "type": "github-issue", "assignee": "<github-login>" }
+    "escalationChannel": { "type": "github-issue", "assignee": "<github-login>" },
+    "pollIntervalSeconds": 60,
+    "maxConcurrentReviews": 1
+  },
+  "host": {
+    "maxConcurrentAgents": 2
   }
 }
 ```
+
+`host` is the one section that belongs to no agent. Every agent on the machine reads it and
+validates it as strictly as its own, because Principle VIII's concurrency cap counts *every* agent
+job on the host — a cap held inside one agent's namespace, or inside one process's memory, could
+never satisfy it (R-019). `reviewService.maxConcurrentReviews` is a ceiling on this service's share
+of that cap and may never exceed it.
 
 `modelEffort` is the one **optional** setting (FR-054). Omitted, as above, the documented default
 `"high"` applies and the effective value is reported with the run, so a value nobody chose is still a
@@ -72,11 +87,13 @@ value everybody can see. Every budget, reserve, threshold, and cap is required.
 excludes whatever git reports as binary, and never infers exclusions from a generated-file heuristic —
 build output is kept out of the repository by `.gitignore` and never reaches a diff (FR-053).
 
-A later agent's settings sit beside this service's and are ignored by it:
+A later agent's settings sit beside this service's and are ignored by it — `host` is shared, an
+agent's own section is not:
 
 ```json
 {
   "reviewService": { "…": "as above" },
+  "host": { "maxConcurrentAgents": 2 },
   "orchestrator": { "humanApprovalRequired": true }
 }
 ```
@@ -87,14 +104,69 @@ The target repository is always an explicit parameter. Running from an unrelated
 the normal case, not an edge case (FR-026, SC-012):
 
 ```bash
-node dist/cli.js review --target owner/name --checkout /path/to/checkout --pull-request 42
+node dist/cli.js --target owner/name --checkout /path/to/checkout --pull-request 42
 ```
 
 Omitting `--target` stops with an error rather than defaulting to the current directory (FR-027):
 
 ```bash
-node dist/cli.js review --pull-request 42
+node dist/cli.js --pull-request 42
 ```
+
+## Install the service (R-017)
+
+Ordinary operation is not the command above. The service is a long-lived local process that
+reconciles state — it lists open pull requests every `pollIntervalSeconds`, and reviews any whose
+head revision the gate has not reported on, or whose blocking findings have drawn a reply since the
+last round concluded (R-018). The by-hand command stays for reproducing one run.
+
+Copy [`scripts/com.agents.review.plist`](../../scripts/com.agents.review.plist) into
+`~/Library/LaunchAgents/`, replacing the three `REPLACE_WITH_…` placeholders and the `--target`
+slug — the paths belong to a machine, which is why the committed file is a template:
+
+```bash
+sed -e "s|REPLACE_WITH_ABSOLUTE_REPOSITORY_PATH|$PWD|" -e "s|REPLACE_WITH_ABSOLUTE_CHECKOUT_PATH|$PWD|" -e "s|REPLACE_WITH_HOME|$HOME|" scripts/com.agents.review.plist > ~/Library/LaunchAgents/com.agents.review.plist
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agents.review.plist
+```
+
+`RunAtLoad` starts it immediately and `KeepAlive` restarts it whenever it stops, including after a
+reboot. A restart loses nothing: the loop observes no events, so the next tick reads the same facts
+from GitHub and converges (R-017).
+
+Confirm it is running, and read what it has done:
+
+```bash
+launchctl print gui/$(id -u)/com.agents.review | head -20
+```
+
+```bash
+tail -f /tmp/com.agents.review.out.log
+```
+
+To run it in the foreground instead — which is what to do while diagnosing, since `launchd` swallows
+the first few seconds of a fast failure:
+
+```bash
+npm run daemon -- --target owner/name --checkout /path/to/checkout
+```
+
+## Uninstall the service
+
+```bash
+launchctl bootout gui/$(id -u)/com.agents.review
+```
+
+```bash
+rm ~/Library/LaunchAgents/com.agents.review.plist
+```
+
+Stopping the service leaves every gate exactly as it was. A pull request whose review never ran has
+no `independent-review` check run, branch protection holds the merge, and the next tick after a
+reinstall picks it up — the same property that makes a crash harmless makes a deliberate stop
+harmless (Principle IV).
 
 ## Test suites
 

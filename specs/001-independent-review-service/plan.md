@@ -2,18 +2,32 @@
 
 **Branch**: `001-independent-review-service` | **Date**: 2026-08-14 | **Spec**: [spec.md](spec.md)
 
+**Amended 2026-08-20**: the deployment topology changed from a GitHub Actions workflow on a
+self-hosted runner to a long-lived local process that reconciles state. See
+[research.md](research.md) R-017, which supersedes R-013. No functional requirement changed; the
+spec's Assumptions and Edge Cases are superseded by its 2026-08-20 addendum rather than rewritten.
+
+**Amended again 2026-08-20**, after a cross-artifact analysis of that amendment: R-017 left two
+requirements unreachable through the new trigger and one host-level resource without a referent.
+[research.md](research.md) R-018 adds a reply clause to the reconciliation predicate so FR-044,
+FR-045 and FR-046 can fire without a new commit; R-019 makes the host-wide concurrency cap a lease
+every agent job acquires, rather than one process's private worker count. Both are recorded in the
+spec's second 2026-08-20 addendum. Still no functional requirement changed — but the first
+amendment's claim that FR-041 was already satisfied is withdrawn there.
+
 **Input**: Feature specification from `/specs/001-independent-review-service/spec.md`
 
 ## Summary
 
-A GitHub App plus a GitHub Actions workflow that reviews every pull request in an explicitly named
+A GitHub App plus a long-lived local process that reviews every pull request in an explicitly named
 target repository and gates its merge. Two reviewer roles — security and implementation — read the
 diff, post line-anchored findings carrying severity and an explicit blocking status, and each conclude
 with a stated verdict. A **check run**, which only a GitHub App can create, carries the combined
 outcome; branch protection makes it required. Every push invalidates prior approvals and triggers a
 fresh review; each round reconciles the service's own prior findings rather than reposting them.
 
-The service runs on a self-hosted runner so model credentials stay in the local environment, keeps the
+The service runs as a local process so model credentials stay in the local environment, discovers work
+by reconciling GitHub's state rather than by receiving events, keeps the
 model call behind a substitutable interface so end-to-end tests drive the whole flow with a scripted
 double, meters both model tokens and platform API requests against version-controlled budgets, and
 fails the gate — never neutral, never skipped — whenever it cannot complete a review.
@@ -31,16 +45,19 @@ CI. That is the one deliberate scope expansion, justified in Complexity Tracking
 (model boundary, behind `ModelClient`); `ajv` (settings and record schema validation); `vitest`
 (test runner). No logging framework — see [research.md](research.md) R-014.
 
-**Storage**: Append-only JSONL budget ledger on the runner host, treated as a cache; the authoritative
+**Storage**: Append-only JSONL budget ledger on the host, treated as a cache; the authoritative
 total is reconstructible from check-run outputs on GitHub (Principle VII, FR-038). No database.
 
 **Testing**: Vitest across three separated layers — unit and integration (no model, no network), and
-end-to-end against a real private fixture repository with only the model boundary substituted
+end-to-end against a real public fixture repository with only the model boundary substituted
 (Principle II, [research.md](research.md) R-015).
 
-**Target Platform**: Self-hosted GitHub Actions runner on a developer machine (macOS/Linux)
+**Target Platform**: A developer machine (macOS/Linux), running the service under the OS service
+manager — `launchd` on macOS. No GitHub Actions runner is registered; `ci.yml` alone runs on
+GitHub-hosted runners, where it needs no model credential (R-017)
 
-**Project Type**: Single TypeScript project — a CLI invoked by a workflow
+**Project Type**: Single TypeScript project — a review core with two entry points, a one-shot CLI and
+a reconciling daemon that calls it
 
 **Performance Goals**: A review of a diff up to 1,000 changed lines concludes within 10 minutes on the
 developer machine (SC-013)
@@ -66,7 +83,7 @@ assumed; two reviewer roles; 54 functional requirements; 24 success criteria
 | V — Bounded Autonomy | No pushes to `main`; no secrets in the repository; **starting-line clause is why the baseline ships here**, human-approved. **Structural containment**: the reviewer holds no write capability on repository contents beyond `resolveReviewThread`, cannot merge, and cannot alter branch protection — those are structural, from the installation's permission set (see [contracts/github-surface.md](contracts/github-surface.md)), not from the reviewer's own compliance. Process-level confinement — filesystem scope, per-agent CPU and memory limits, restricted egress — is **deferred**, not satisfied, per the constitution's own requirement that the sandboxing runtime be settled by a file-I/O spike before adoption | **Pass with two notes** — see Complexity Tracking |
 | VI — Independent Review Gates Every Merge | The feature *is* this gate; the one-time bootstrap exception is recorded in the spec | **Pass under the recorded exception** |
 | VII — Traceable and Observable Runs | Control flow is a declared XState machine with a generated diagram; every record carries a run identifier; state reconstructible from GitHub; escalation always notifies | **Pass** — R-009, R-010, R-014, FR-033/FR-034/FR-035 |
-| VIII — Isolated Parallel Execution | Reviewer jobs take an ordinary slot in the host-wide cap; no exemption; task footprints declared at `/speckit-tasks` | **Pass** — FR-041, R-013 |
+| VIII — Isolated Parallel Execution | Reviewer jobs take an ordinary slot in the host-wide cap; no exemption; task footprints declared at `/speckit-tasks` | **Pass** — FR-041, [research.md](research.md) R-019. Held only because R-019 makes the cap a host-level lease; under R-017 alone it was a per-process worker count and this row did **not** hold — see Complexity Tracking |
 | IX — Documentation Ships With The Feature | `docs/independent-review-service.md` ships in this pull request, including the generated statechart diagram | **Pass** — planned deliverable |
 | X — Minimal Pull Requests | The feature enforces Principle X (FR-042/FR-043); its own pull request exceeds the cap | **Justified** — see Complexity Tracking |
 
@@ -92,7 +109,7 @@ Two least-privilege tensions are recorded rather than hidden
 ```text
 specs/001-independent-review-service/
 ├── plan.md              # This file
-├── research.md          # Phase 0 — 15 decisions with rationale and rejected alternatives
+├── research.md          # Phase 0 — 19 decisions with rationale and rejected alternatives
 ├── data-model.md        # Phase 1 — entities, fields, lifecycles, the statechart
 ├── quickstart.md        # Phase 1 — setup, commands, 29 validation scenarios
 ├── contracts/           # Phase 1
@@ -109,7 +126,11 @@ specs/001-independent-review-service/
 
 ```text
 src/
-├── cli.ts                    # Entry point; parses --target, --checkout, --pull-request
+├── cli.ts                    # One-shot entry point; parses --target, --checkout, --pull-request
+├── daemon.ts                 # Reconciling entry point; poll loop, both predicate clauses, bounded workers (R-017, R-018)
+├── composition.ts            # The only place concrete adapters are constructed and wired
+├── worktree.ts               # Bare mirror, fetch head, detached worktree, cleanup (R-017)
+├── host-lease.ts             # Host-wide agent slot lease; every job acquires one (R-019)
 ├── config/
 │   ├── settings.ts           # Load + validate against the schema; no defaults in code
 │   └── target.ts             # Resolve every path through the target parameter (FR-026)
@@ -161,19 +182,24 @@ tests/
 └── e2e/                      # Real GitHub fixture repo; only ModelClient substituted
 
 scripts/
-└── generate-diagram.ts       # Statechart → diagram, wired into `check` (Principle VII)
+├── generate-diagram.ts       # Statechart → diagram, wired into `check` (Principle VII)
+├── github-app-token.sh       # Mint an installation token by hand; the reviewing identity
+└── com.agents.review.plist   # launchd user agent: RunAtLoad, KeepAlive (R-017)
 
 .github/workflows/
-├── review.yml                # The reviewer itself (pull_request, self-hosted)
-└── ci.yml                    # Lint, format, types, unit, integration
+└── ci.yml                    # Lint, format, types, unit, integration — GitHub-hosted
 
 schemas/                      # Published copies of the contract schemas
 docs/
 └── independent-review-service.md   # Principle IX; includes the generated statechart
 ```
 
-**Structure Decision**: A single TypeScript project. There is no frontend, no service to deploy, and
-no Python — the deliverable is a CLI that a workflow invokes. Directories follow the seams the spec
+**Structure Decision**: A single TypeScript project. There is no frontend, no cloud service to deploy,
+and no Python — the deliverable is a review core reached two ways: `cli.ts` reviews one named pull
+request and exits, `daemon.ts` finds the pull requests needing review and calls the same core. Keeping
+the one-shot path a first-class entry point rather than a debug affordance is deliberate: it is what
+makes the service runnable by hand against a real pull request before any scheduling exists, and it
+keeps the reconciliation loop free of review logic. Directories follow the seams the spec
 already draws (configuration, platform, model, review logic, ledger, observability), so that the
 places most likely to change independently — the model adapter, the escalation channel, a future
 reviewer role — are each behind one boundary.
@@ -186,4 +212,5 @@ reviewer role — are each behind one boundary.
 | Installation holds `contents: write` | Resolving a review thread — FR-039's reconciliation — is available only through the GraphQL `resolveReviewThread` mutation, which requires repository contents read **and** write. | Leaving findings unresolved across rounds was rejected by the spec's clarification: an unreconciled thread grows without bound and makes the comment history unreadable. No REST equivalent exists — review threads are not exposed there at all. |
 | Installation holds `administration: read` | FR-051 requires verifying that the merge gate is a required check before reviewing, and branch protection is readable only under this permission. A gate nothing enforces is the one failure that leaves the service looking healthy while doing nothing. | Trusting that a human configured branch protection correctly was rejected by the clarification that added FR-051 — it is the quietest failure in the system, and one read makes it loud. Configuring branch protection instead of verifying it was rejected outright: it needs the corresponding **write**, which would let the service remove its own gate. |
 | Process-level containment deferred (Principle V) | Principle V requires filesystem scope, per-agent CPU and memory limits, and restricted egress to be enforced by the execution environment. This feature ships none of them. The constitution's own Technology section requires the sandboxing runtime — and the isolated-checkout mechanism it forces — to be settled by a file-I/O spike on the host platform *before* adoption, and that spike is not this feature. | Adopting a container runtime here was rejected: it prejudges the spike the constitution requires, and Principle IV's YAGNI-for-infrastructure clause applies hardest to exactly this kind of component. What is **not** deferred is the part achievable through permissions: the reviewing identity structurally cannot merge, cannot push, and cannot alter branch protection, so the highest-blast-radius actions are already out of reach rather than left to the agent's compliance. Recorded here so the gap is visible rather than assumed closed. |
+| A host-wide lease with one participant (R-019) | Principle VIII's cap is "global across every in-flight feature and task combined" and counts any CI or reviewer job on the same host; FR-041 forbids exempting reviewer jobs from it. Today the daemon is the only agent that exists, so the lease looks like ceremony for an audience of one. | Deferring the lease until a second agent exists was rejected for the same reason FR-047 defines the token ledger now rather than later: a shared resource nobody retrofits is a shared resource that never arrives, and the moment a `/speckit-implement` task runs beside a review, an in-memory worker count is silently wrong. Keeping R-017's per-process count was rejected outright — it is what made this row necessary. |
 | Five runtime dependencies | Octokit (App auth and rate-limit signals), XState (Principle VII's declared control flow), the Anthropic SDK (model boundary), Ajv (machine-checkable contracts per Principle III), Vitest (the baseline's test runner). | Hand-rolling App token exchange and rate-limit accounting puts a silent, security-sensitive bug in the two places that matter most; hand-rolled control flow is prohibited outright by Principle VII. Where a dependency was avoidable it was avoided — the logger is ~40 lines and the ledger is a file. |

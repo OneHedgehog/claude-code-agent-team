@@ -930,3 +930,101 @@ considered; the property it was protecting is intact.
   rather than surfacing as a `401` partway through a review. FR-051 names only permissions and
   branch protection; this extends the same pre-spend discipline to FR-032 without altering what
   FR-051 requires.
+
+### 2026-08-20 — Deployment topology: a local reconciling process, not a workflow
+
+**What changed.** The service is no longer a GitHub Actions workflow on a self-hosted runner. It is
+a long-lived process on the developer machine that finds work by reconciling GitHub's state — for
+each open pull request, does a check run named `independent-review` already exist for its current
+head SHA? — rather than by receiving `pull_request` events.
+`.github/workflows/review.yml` is deleted. `ci.yml` is unaffected and stays on GitHub-hosted runners.
+
+The decision, its rationale, and the alternatives are [research.md](research.md) R-017, which
+supersedes R-013. This was recorded after R-013 was implemented and before it was ever operated.
+
+**Why no functional requirement changed.** Every requirement that named the environment turned out
+to name a property instead:
+
+| Requirement | What it constrains | Under R-017 |
+|---|---|---|
+| **FR-001** | Runs automatically on open and on every push, no manual invocation | Satisfied; the requirement never names a transport |
+| **FR-019** | Only the run examining the current head may report the gate | Satisfied explicitly — a run re-reads head SHA before posting, where `cancel-in-progress` did it implicitly |
+| **FR-032** | Credentials local, never from CI secrets | Satisfied more completely — there is no CI in the path |
+| **FR-041** | Queues when *the host's configured concurrency cap* leaves no slot | Satisfied; the cap is the process's bounded worker count. Only the source of the queue-wait measurement changes |
+
+**How to read the passages above that are now historical.** Three non-normative passages name the
+runner and are not edited: Edge Cases → "Self-hosted runner offline", Assumptions → "Runner", and
+Dependencies. Read "self-hosted runner offline" as "the review process is not running" — the
+behaviour it describes is unchanged and still correct: the gate never reports, and branch
+protection's required-check requirement keeps the pull request un-mergeable. The Input quotation at
+the top of this document records the original request verbatim and is likewise left alone.
+
+**One behavioural change, in the direction of the spec rather than away from it.** Forks appear
+nowhere in this specification: FR-001 says *every* pull request in the target repository. The
+workflow design could not honour that. Because its job checked out the pull request's own code and
+ran `npm ci` and `npm run build` against it on the host, a fork's pull request had to be refused
+outright — otherwise any stranger opening one would obtain arbitrary code execution on the
+developer's machine. That exclusion was an unrecorded deviation from FR-001, visible only in
+`review.yml` and the feature document. The reconciling process reads the diff and the tree and
+executes nothing from either, so the exclusion is removed along with the workflow, and FR-001 holds
+for the first time.
+
+### 2026-08-20 (second entry) — Two R-017 consequences the first entry did not state
+
+The 2026-08-20 topology entry above concluded that no functional requirement changed. That holds for
+what each requirement *demands*, and it was checked requirement by requirement. What it missed is
+that two requirements demand something the new trigger cannot *reach*, and that a third names a
+resource the new topology no longer has. Both are recorded here rather than by editing the entry
+above, because the entry was correct about intent and wrong only about consequence.
+
+#### FR-044, FR-045 and FR-046 need a trigger the reconciliation predicate does not provide
+
+**What was missed.** R-017's idempotency key is *head SHA plus the existence of an
+`independent-review` check run for it*. A reply to a blocking finding does not move the head SHA, so
+under that predicate alone a pull request whose author answers a finding with a justification is
+skipped on every subsequent tick, forever. Three requirements depend on a round that starts without
+a new commit:
+
+| Requirement | Why it needs one |
+|---|---|
+| **FR-044** | "On re-review, the service MUST read replies to its own blocking findings and MUST judge each stated justification." A justification is normally offered *instead of* a code change |
+| **FR-045** | The waiver request FR-044 raises can only be raised by the round that judges the reply |
+| **FR-046** | Defined as a comparison between consecutive concluded rounds *on an identical head revision*. A second round on the same revision never starting makes the no-progress detector unreachable by construction |
+
+Under R-013 these arrived free: `pull_request` and `pull_request_review_comment` were both events.
+Level-triggered reconciliation observes no events, so what was implicit has to be stated.
+
+**The correction** is [research.md](research.md) R-018, which adds a second, reply-derived clause to
+the predicate. No requirement text changes; the requirements were always reachable in principle and
+are now reachable in fact.
+
+**Why this is a spec-level note rather than only a research note.** FR-046's forward-progress rule
+reads as a guard against a stalled author. It is also, under R-018, the *only* thing that bounds a
+reply-triggered round from re-firing — so the two mechanisms are now load-bearing for each other, and
+a future change to either has to account for the other.
+
+#### FR-041's "host's configured concurrency cap" has no host-level referent under R-017
+
+**What was missed.** The first entry's table reads FR-041 as satisfied because "the cap is the
+process's bounded worker count". FR-041's own last sentence is stricter than that: "Reviewer jobs
+MUST count against the same host-wide cap as every other agent job and MUST NOT be exempted from
+it." Constitution Principle VIII is stricter still — the cap "is global across every in-flight
+feature and task combined, never per feature, and it counts any CI or reviewer job executing on the
+same host."
+
+A worker pool private to one process counts only its own workers. Under R-013 the runner's job slots
+were at least a host-level resource that other agent jobs on the same runner drew from; R-017
+replaced a shared counter with a private one, which is a regression against both FR-041 and
+Principle VIII rather than a re-satisfaction of them.
+
+**The correction** is [research.md](research.md) R-019: a host-level lease that every agent job
+acquires before it runs, with `maxConcurrentReviews` demoted to what it always actually was — a
+ceiling on the reviewer's *share*, not the host's cap. This mirrors the arrangement FR-047 already
+establishes for tokens: this feature defines and owns a shared resource, and later features draw on
+it rather than keeping their own.
+
+**One consequence for FR-050.** The host cap belongs to no single agent, so it cannot live in an
+agent's own section. It goes in a shared `host` section that every agent reads and that this service
+validates strictly, alongside its own. FR-050's rule is unchanged where it applies — *sibling agents'*
+sections are still ignored rather than rejected — but "ignore everything that is not mine" was too
+broad a reading of it, and the shared section is the exception R-019 names.
