@@ -1,23 +1,55 @@
 # Independent Review Service
 
-A GitHub App and workflow that reviews every pull request in a named target repository and gates its
-merge. Two reviewer roles — security and implementation — read the diff, post line-anchored findings
+A GitHub App and a local reconciling process that review every pull request in a named target
+repository and gate its merge. Two reviewer roles — security and implementation — read the diff, post line-anchored findings
 carrying severity and an explicit blocking status, and each conclude with a stated verdict. A check
 run, which only a GitHub App can create, carries the combined outcome.
 
 **Spec**: [specs/001-independent-review-service/spec.md](../specs/001-independent-review-service/spec.md).
 That document records what was intended when it was written and is never rewritten. This one records
-what is true now.
+what is true now. The repository's entry point is the [README](../README.md), which routes to this
+document, the [prerequisites checklist](prerequisites.md), and the spec.
 
-> **Status: not yet operational.** The code below is built and tested, but the service cannot run
-> against a real pull request until the [human prerequisites](#human-prerequisites) are met — the
-> GitHub App, the fixture repository, and the runner. The [merge gate](#the-merge-gate) is
-> implemented and no longer blocked, but `main` is unprotected, so the gate is not yet required by
-> anything.
+> **Status: built and validated end to end; not yet operational on the target.** The code below is
+> complete and all three test layers pass, including the full end-to-end suite driven against a real
+> public fixture repository — every one of the 29 validation scenarios, with only the model boundary
+> substituted. See [validation scenarios](#validation-scenarios).
+>
+> One thing remains, and it is configuration rather than code: on the **target** repository `main`
+> is protected but its required status checks are empty, so `independent-review` is not a required
+> check and the service correctly refuses to review under a gate nothing enforces. Adding that check
+> is a human step, by design — an identity that could add it could remove it. See
+> [human prerequisites](#human-prerequisites).
+
+## How work is discovered
+
+The service is a **long-lived local process that reconciles state**, not a workflow reacting to
+events (R-017). Every `pollIntervalSeconds` it lists the open pull requests with a conditional
+request — an unchanged listing answers `304` and costs no rate limit — and selects one when either
+clause holds (R-018):
+
+- **(a)** no `independent-review` check run exists for its head revision; or
+- **(b)** one exists, it concluded `failure`, its output lists open blocking findings, and one of
+  those findings has drawn a reply newer than that run's conclusion time.
+
+Clause (b) is not an optimisation. FR-044 requires the service to judge a justification an author
+offers *instead of* changing the code, which leaves the head revision exactly where it was — so
+under clause (a) alone that pull request would be skipped on every tick forever, and the waiver
+request and the no-progress detector would both be unreachable.
+
+Level-triggered reconciliation has no missed-event class of bug, because it observes no events. A
+laptop that slept for a week, a process killed mid-review, a crash between posting findings and
+posting the gate: the next tick reads the same facts back from GitHub and converges. The process
+holds nothing that outlives a tick except an `ETag`, and a stale `ETag` costs one wasted listing.
+
+**A fork's pull request is reviewed like any other.** Nothing here executes anything the reviewed
+tree contains — the code is read as data, a diff and a file listing, and the only program the
+service runs against a checkout is `git`, with arguments the service chose. The exclusion the old
+workflow needed is gone with the workflow.
 
 ## What it does
 
-For each pull request, in order:
+For each selected pull request, in order:
 
 1. Resolves the target repository's constitution and operating settings **through an explicit
    `--target` parameter**, never through the working directory.
@@ -31,7 +63,10 @@ For each pull request, in order:
 6. Reconciles against its own prior findings: resolves what the revision no longer exhibits, leaves
    standing what it does, adds what is new. It never reposts, and never resolves a finding it did
    not see fixed.
-7. Reports a single check run: `success`, `failure` with a reason, or nothing at all.
+7. Re-reads the head revision immediately before posting, and discards its outcome if the author
+   has pushed since — findings anchored to lines that have moved, and a gate for code nobody is
+   proposing to merge, are worse than nothing (FR-019).
+8. Reports a single check run: `success`, `failure` with a reason, or nothing at all.
 
 Every push invalidates prior approvals, because the gate is recreated for the new head SHA and a
 stale approval has nothing to attach to.
@@ -98,6 +133,10 @@ state pointless.
 | Review logic | [`review/`](../src/review/) | Roles, rules, findings, locations, reconciliation, waivers, progress, precedence, the gate |
 | Ledger | [`ledger/`](../src/ledger/) | Cumulative token spend with a reviewer reserve, reconstructible from check runs |
 | Observability | [`observability/`](../src/observability/) | JSON-lines records with redaction; escalation |
+| Composition | [`composition.ts`](../src/composition.ts) | The one place concrete adapters are constructed, and the review run they drive |
+| Trigger | [`daemon.ts`](../src/daemon.ts) | The poll loop, the two-clause selection predicate, and the bounded workers |
+| Checkout | [`worktree.ts`](../src/worktree.ts) | A bare mirror per target and a detached worktree per review, removed afterwards |
+| Concurrency | [`host-lease.ts`](../src/host-lease.ts) | The host-wide agent cap, as a filesystem lease every agent takes |
 
 ### Two identities, and why the separation is structural
 
@@ -124,6 +163,19 @@ node dist/cli.js --target owner/name --checkout /path/to/checkout --pull-request
 ```
 
 A missing `--target` stops with an error rather than defaulting to the working directory.
+
+That command reviews **one named pull request** and is the by-hand path. Ordinary operation is the
+daemon, installed as a `launchd` user agent from
+[`scripts/com.agents.review.plist`](../scripts/com.agents.review.plist):
+
+```bash
+npm run daemon -- --target owner/name --checkout /path/to/checkout
+```
+
+`RunAtLoad` and `KeepAlive` start it at login and restart it whenever it stops. A restart loses
+nothing, which is the whole reason the trigger reconciles rather than listens. Install and uninstall
+steps are in
+[quickstart.md](../specs/001-independent-review-service/quickstart.md#install-the-service-r-017).
 
 Settings live at `<target>/.agents/settings.json` under a `reviewService` section, validated against
 [`schemas/settings.schema.json`](../schemas/settings.schema.json). Every budget, reserve, threshold
@@ -158,18 +210,21 @@ crash from being mistaken for an author who pushed nothing.
 **The service verifies branch protection; it never configures it.** An identity that can write branch
 protection can remove its own gate.
 
-**A fork's pull request never reaches the self-hosted runner.** The reviewer job checks out the pull
-request's own code and builds it, so on a public repository an unguarded workflow would hand any
-stranger arbitrary code execution on the runner host. `review.yml` is gated on
-`github.event.pull_request.head.repo.full_name == github.repository`, and the repository's fork
-pull-request approval policy is set to `all_external_contributors` as defence in depth — approval is
-a human clicking a button, and the guard is what cannot be misclicked.
+**The concurrency cap counts every agent on the machine, not this process's own workers.** It is a
+filesystem lease — `slot-01 … slot-NN` under `${XDG_STATE_HOME:-~/.local/state}/agents/slots/`,
+taken with `open(O_CREAT | O_EXCL)` — because a number one process holds in memory cannot satisfy a
+cap that is "global across every in-flight feature and task combined". A `/speckit-implement` task,
+a local CI run, and a review would each stay inside their own limit while three of them ran against
+a cap of two. `reviewService.maxConcurrentReviews` survives as a ceiling on the reviewer's *share*
+of that cap; a review holds both before it starts (R-019).
 
-The consequence is deliberate: a fork's pull request gets no review, so the gate is never reported
-and branch protection keeps it un-mergeable. That is the same "un-mergeable and quiet beats
-mergeable" boundary R-013 records for a review that never starts. A fork contributor's change
-reaches `main` by a maintainer taking it onto a branch in this repository, where it is reviewed like
-anything else.
+**The fork exclusion is gone, and that is a consequence of the topology rather than a relaxation.**
+The previous design ran `npm ci` and `npm run build` against the pull request's own code on the
+host, which is why the workflow was gated on
+`github.event.pull_request.head.repo.full_name == github.repository`. Nothing executes the reviewed
+tree any more, so the guard has nothing left to protect. The repository's fork pull-request approval
+policy remains set to `all_external_contributors` for CI, which is a separate workflow with separate
+reasons.
 
 ### Two least-privilege tensions, recorded rather than hidden
 
@@ -190,7 +245,7 @@ merge, cannot push, and cannot alter branch protection.
 
 ## Human prerequisites
 
-Six things must be set up before the service can run against a real pull request, and none of them
+Some things must be set up before the service can run against a real pull request, and none of them
 can be done by the service — an identity that can provision its own gate can remove it.
 
 **[docs/prerequisites.md](prerequisites.md) is the checklist**, with the current state of each, the
@@ -198,14 +253,21 @@ order to do them in, and the reasoning. In summary:
 
 | # | Prerequisite | State |
 |---|---|---|
-| 1 | GitHub App — the reviewing identity | Not created |
-| 2 | Model API key, on the runner and never in Actions secrets | Not provisioned |
+| 1 | GitHub App — the reviewing identity | Created and installed on the target |
+| 2 | Model credential on the developer machine, never in Actions secrets — an `ant auth login` profile | Provisioned |
 | 3 | Fork CI blocking | Done |
-| 4 | Self-hosted runner, labelled `agents-host` | Not registered |
-| 5 | Branch protection requiring `independent-review` | Available, not configured |
-| 6 | Fixture repository for the e2e suite | Not created |
+| 4 | ~~Self-hosted runner, labelled `agents-host`~~ | **Removed.** No runner is registered; the host cap is a lease (R-017, R-019) |
+| 5 | Branch protection requiring `independent-review` on the **target** | Available, **not configured** |
+| 6 | Fixture repository for the e2e suite | **Done** — [`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad), public, seeded, App installed, gate required on `main` |
 
-None of these block `npm run check`. They block real operation and all 28 `tests/e2e/**` tasks.
+None of these block `npm run check`. Item 6 previously blocked every `tests/e2e/**` task and no
+longer does: the fixture was created and seeded on 2026-08-27 and its gate was made a required check
+on 2026-08-28, and the suite has run green against it since.
+
+Item 5 is the last one open, and it blocks **real operation only**. The service verifies it on every
+run and never writes it, so until a human adds `independent-review` to the target's required status
+checks, every review of a target pull request will stop at its prerequisite check, spend nothing,
+and escalate — which is the designed behaviour rather than a defect.
 
 ## The merge gate
 
@@ -215,9 +277,11 @@ protection and [`review/prerequisites.ts`](../src/review/prerequisites.ts) asser
 spent. The service **verifies and never configures**: configuring would need `administration:
 write`, and an identity that can write branch protection can remove its own gate.
 
-`main` is currently **unprotected**, so the endpoint returns `404 Branch not protected` and the
-service fails its own prerequisite check with a reason naming the branch. Making the gate real is a
-human step: add `independent-review` to the branch's required status checks.
+**Verified 2026-08-24**: `main` is protected — the endpoint returns `200`, superseding the `404
+Branch not protected` recorded earlier — but its `required_status_checks.contexts` and `.checks` are
+both empty, so `isGateRequired` returns `false` and the service still fails its own prerequisite
+check. Making the gate real remains a human step: add `independent-review` to the branch's required
+status checks.
 
 Four responses, four meanings — and two of them share a status code:
 
@@ -239,10 +303,87 @@ target.
 
 | Layer | Model | Gates merge | Status |
 |---|---|---|---|
-| Unit | Not invoked | Yes | 562 tests passing |
-| Integration | Not invoked | Yes | 52 tests passing |
-| End-to-end | Scripted double | Yes | **Not yet runnable** — needs the App and fixture repository |
+| Unit | Not invoked | Yes | 648 tests passing |
+| Integration | Not invoked | Yes | 88 tests passing |
+| End-to-end | Scripted double | Yes (`test:e2e`, run separately) | 48 tests passing against the live fixture |
 
 End-to-end tests exercise real git, real branches, real pull requests, with only the model boundary
 substituted. They assert on states entered, comments posted, verdicts recorded, gate conclusion, and
-escalations — never on generated wording.
+escalations — never on generated wording, which a lint rule over `tests/e2e/` enforces rather than
+leaving to discipline.
+
+`npm run check` deliberately runs the first two layers and not the third. The end-to-end suite talks
+to GitHub, consumes a shared API allowance, and takes minutes; folding it into the command run on
+every change would make the fast layers as slow as the slowest one and would couple a local edit to
+the availability of a remote service. It is run on its own, by `npm run test:e2e`.
+
+## Validation scenarios
+
+All 29 of the [quickstart](../specs/001-independent-review-service/quickstart.md) validation
+scenarios have been run against the live fixture repository
+[`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad) and pass, along with
+the two suite-level criteria. **Recorded 2026-08-28.**
+
+Each drives the real composition root against a real pull request, with `ScriptedModelClient`
+substituted at the model boundary and nothing else replaced.
+
+| # | Scenario | Where | Result |
+|---|---|---|---|
+| 1 | Clean pull request | [`gating-verdict.e2e.ts`](../tests/e2e/gating-verdict.e2e.ts) | Pass |
+| 2 | Hardcoded credential | [`findings.e2e.ts`](../tests/e2e/findings.e2e.ts) | Pass |
+| 3 | Behavior change with no `docs/` update | [`constitutional-rules.e2e.ts`](../tests/e2e/constitutional-rules.e2e.ts) | Pass |
+| 4 | Unrelated refactor in the diff | [`constitutional-rules.e2e.ts`](../tests/e2e/constitutional-rules.e2e.ts) | Pass |
+| 5 | Oversized pull request, unjustified | [`constitutional-rules.e2e.ts`](../tests/e2e/constitutional-rules.e2e.ts) | Pass |
+| 6 | Same, justified in the description | [`constitutional-rules.e2e.ts`](../tests/e2e/constitutional-rules.e2e.ts) | Pass |
+| 7 | Push after approval | [`staleness.e2e.ts`](../tests/e2e/staleness.e2e.ts) | Pass |
+| 8 | Re-review: one fixed, one standing, one new | [`staleness.e2e.ts`](../tests/e2e/staleness.e2e.ts) | Pass |
+| 9 | Justification rejected | [`waivers.e2e.ts`](../tests/e2e/waivers.e2e.ts) | Pass |
+| 10 | Justification accepted → waiver request | [`waivers.e2e.ts`](../tests/e2e/waivers.e2e.ts) | Pass |
+| 11 | Re-trigger with no progress | [`progress.e2e.ts`](../tests/e2e/progress.e2e.ts) | Pass |
+| 12 | Retry after a crashed round | [`progress.e2e.ts`](../tests/e2e/progress.e2e.ts) | Pass |
+| 13 | Model credential absent, and a mid-run error | [`fail-closed.e2e.ts`](../tests/e2e/fail-closed.e2e.ts) | Pass |
+| 14 | Budget exhausted | [`budget.e2e.ts`](../tests/e2e/budget.e2e.ts) | Pass |
+| 15 | Budget drawn to the reviewer reserve | [`budget.e2e.ts`](../tests/e2e/budget.e2e.ts) | Pass |
+| 16 | Diff over `maxReviewableDiffSize` | [`fail-closed.e2e.ts`](../tests/e2e/fail-closed.e2e.ts) | Pass |
+| 17 | Platform reserve reached | [`rate-limit.e2e.ts`](../tests/e2e/rate-limit.e2e.ts) | Pass — **required new code**, see below |
+| 18 | Self-authored pull request | [`self-review.e2e.ts`](../tests/e2e/self-review.e2e.ts) | Pass — **found a real defect**, see below |
+| 19 | Authoring identity attempts the gate | [`gate-identity.e2e.ts`](../tests/e2e/gate-identity.e2e.ts) | Pass |
+| 20 | Security blocks what implementation accepts | [`gating-verdict.e2e.ts`](../tests/e2e/gating-verdict.e2e.ts) | Pass |
+| 21 | Escalation reaches both surfaces | [`escalation.e2e.ts`](../tests/e2e/escalation.e2e.ts) | Pass |
+| 22 | A concluded run is reconstructible | [`accountability.e2e.ts`](../tests/e2e/accountability.e2e.ts) | Pass |
+| 23 | Run from an unrelated working directory | [`addressing.e2e.ts`](../tests/e2e/addressing.e2e.ts) | Pass |
+| 24 | Host cap full, wait under the maximum | [`queue.e2e.ts`](../tests/e2e/queue.e2e.ts) | Pass |
+| 25 | Queue wait over the maximum | [`queue.e2e.ts`](../tests/e2e/queue.e2e.ts) | Pass — **required new code**, see below |
+| 26 | Gate not required, and a missing permission | [`prerequisites.e2e.ts`](../tests/e2e/prerequisites.e2e.ts) | Pass |
+| 27 | Empty or whitespace-only diff | [`empty-diff.e2e.ts`](../tests/e2e/empty-diff.e2e.ts) | Pass |
+| 28 | Sibling section, unknown own key, absent optional | [`settings.e2e.ts`](../tests/e2e/settings.e2e.ts) | Pass |
+| 29 | Excluded and binary paths | [`excluded-paths.e2e.ts`](../tests/e2e/excluded-paths.e2e.ts) | Pass |
+| SC-010 | No assertion on generated wording | `eslint-rules/no-generated-content-assertions.js` | Enforced by lint |
+| SC-013 | 1,000 changed lines within ten minutes | [`performance.e2e.ts`](../tests/e2e/performance.e2e.ts) | Pass |
+
+### What running them actually found
+
+The suite was worth running rather than merely worth having, and three of the twenty-nine scenarios
+are the reason.
+
+**Scenario 18 found a real defect.** The self-review refusal compared the pull request's author
+against `` `${repository.name}[bot]` `` — the *repository's* name — rather than against the App's
+own login. Those two strings coincide only by accident, and where they differ the check silently
+never fires: the service reviewed a pull request it had authored itself, and the only thing that
+stopped it was GitHub refusing to let an author request changes on their own pull request, several
+API calls and a full model spend later. FR-004's independence had collapsed in exactly the quiet way
+it was written to prevent. The reviewing identity is now read from the installation itself — the
+`app_slug` GitHub reports alongside the installation id — and carried on `ServiceAdapters`. Pinned at
+the integration layer too, with the App's login and the repository's name deliberately different.
+
+**Scenario 17 required code that did not exist.** FR-040's pause-and-resume behaviour had a module
+(`github/rate-limit.ts`) and a settings pair, and nothing ever called them: the composed flow made no
+allowance check at all. It does now, between the token-budget check and opening the gate, reading the
+live remaining figure from GitHub rather than counting locally — the allowance refills, and a local
+counter has no way to know when.
+
+**Scenario 25 required code that could not fire.** `measureQueueWait` existed and was measured from a
+`queuedAt` re-stamped on every tick, so the wait could only ever be one tick long and FR-041's
+maximum was unreachable however saturated the machine. The daemon now remembers when each review
+first entered the queue, keyed by pull request *and* revision so a push starts a fresh wait, and an
+exceeded wait now reports a failing gate and escalates rather than only writing a log line.
