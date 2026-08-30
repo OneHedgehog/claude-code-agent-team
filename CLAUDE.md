@@ -31,35 +31,77 @@ authenticates with an empty key instead of falling through. Resolution order:
 `ANTHROPIC_API_KEY` → `ANTHROPIC_AUTH_TOKEN` → active profile → Workload Identity Federation →
 default profile on disk. All three variables are currently unset; keep them that way.
 
-`AnthropicModelClient` cannot use a profile as written — its constructor requires a non-empty key.
-See [docs/prerequisites.md](docs/prerequisites.md) §2.
+`AnthropicModelClient` accepts a profile: the credential is resolved to a `ModelCredential` carrying
+its `source`, and an `oauth-profile` credential legitimately carries no key, so only a source that
+promises a key and then supplies an empty one is rejected. Presence is checked as a **startup
+prerequisite** alongside permissions and branch protection, so an absent credential costs zero tokens
+instead of surfacing as a `401` mid-review. See [docs/prerequisites.md](docs/prerequisites.md) §2.
 
 ## Repositories
 
 | Role | Repository | State |
 |---|---|---|
 | **Target** — what this tree pushes to, and what the review service reviews | `OneHedgehog/claude-code-agent-team` | **Public**, default branch `main`, wired as `origin` over SSH |
-| **Fixture** — repo the e2e suite drives (R-015) | not created | Human prerequisite |
+| **Fixture** — repo the e2e suite drives (R-015) | [`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad) | **Public**, seeded 2026-08-27, App installed. Branches `main` — gate required since 2026-08-28 — and `unprotected-base`, deliberately left unprotected for quickstart scenario 26 |
 
 Neither the spec nor the contracts name these; they say "the target repository". This table is the
 mapping.
 
-## The merge gate: unblocked, not yet configured
+## The merge gate: configured and live
 
 The target repository was private on GitHub Free, which offers neither branch protection nor
 rulesets, so FR-051 built as specified would have refused every review permanently. **That is
 resolved — the repository is public**, `/branches/main/protection` reaches the feature, and
 `src/github/branch-protection.ts` plus `src/review/prerequisites.ts` are implemented.
 
-What remains is configuration, not code. `main` is currently **unprotected**, so the endpoint
-returns `404 Branch not protected` and the service will fail its own prerequisite check with a
-reason naming the branch. To make the gate real, a human adds `independent-review` — the value of
-`MERGE_GATE_CHECK_NAME` — to the branch's required status checks. The service verifies this and
-never writes it: an identity that can change branch protection can remove its own gate.
+**Verified 2026-08-30**: the gate is real. `main` is protected and
+`required_status_checks.contexts` is `["independent-review"]`, so `isGateRequired` returns `true` and
+the service passes this prerequisite. This supersedes the 2026-08-24 record, where the branch was
+protected but `contexts` and `.checks` were both empty.
 
-**The fixture repository needs the same treatment.** Most e2e scenarios need the gate to *be*
-required; only quickstart scenario 26 needs it absent. A private fixture on GitHub Free would hit
-the original wall again.
+**What that means operationally, and it is not small.** `main` is now unmergeable until the service
+reports `independent-review` green on each head SHA, and `enforce_admins` means nobody can override
+it. The service is the only producer of that context — `review.yml` is gone and `ci.yml` publishes
+different names — so while the daemon is not running, pull requests sit at *Expected — waiting for
+status to be reported* indefinitely. The daemon is **not installed under `launchd` today**; until it
+is, assume the target's `main` is closed. §5 of [docs/prerequisites.md](docs/prerequisites.md)
+carries both the command that set this and the one that removes it again.
+
+The service verifies branch protection and never writes it: an identity that can change branch
+protection can remove its own gate. Setting it is a human step, done with a PAT — never with the
+App's installation token, which holds `administration: read` only.
+
+The rest of the protection is already set: `enforce_admins`, `dismiss_stale_reviews` — which matches
+FR-017's push-invalidates-approvals rule — `required_conversation_resolution`, strict up-to-date
+branches, one required approving review, and neither force pushes nor deletions.
+
+**The fixture repository's gate is configured.**
+[`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad) is **public** —
+precisely because a private fixture on GitHub Free would hit the original wall again — seeded
+2026-08-27, with the App installed (installation `155031737`, the same one that covers the target)
+and two branches: `main`, and `unprotected-base` for quickstart scenario 26. Most e2e scenarios need
+the gate to *be* required; only scenario 26 needs it absent, which is why the unprotected branch is a
+standing fixture rather than a mid-suite reconfiguration.
+
+**Verified 2026-08-28**: `main`'s `required_status_checks.contexts` is `["independent-review"]`, and
+`unprotected-base` still answers `Branch not protected`, which is what scenario 26 needs. The e2e
+suite runs: `npm run test:e2e` passes the harness smoke check 7/7 against the real fixture.
+
+It was set through the API, not the settings UI. The picker there searches only checks seen in the
+last week, and the usual round-trip — open a pull request so GitHub sees the context once — is
+circular on the fixture, because the service emits that context only when it runs and most scenarios
+need the gate required before it does. To set one on another repository:
+
+```bash
+T="$(security find-generic-password -s github-mcp-pat -w)" \
+  curl -s -X PATCH -H "Authorization: Bearer $T" \
+  https://api.github.com/repos/OWNER/REPO/branches/main/protection/required_status_checks \
+  -d '{"checks":[{"context":"independent-review"}]}'
+```
+
+`Administration: write` is legitimate on the *fixture* — its protection state is the test fixture —
+and must never be held against the target. The checklist is
+[docs/prerequisites.md](docs/prerequisites.md) §6.
 
 ## Two 403s that mean different things
 

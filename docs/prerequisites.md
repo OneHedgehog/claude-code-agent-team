@@ -7,7 +7,8 @@ out of reach and stays a human step.
 
 This is the operational checklist. The *why* behind each choice lives in
 [independent-review-service.md](independent-review-service.md); the short version an agent needs in
-context lives in [CLAUDE.md](../CLAUDE.md).
+context lives in [CLAUDE.md](../CLAUDE.md); and the [README](../README.md) is the entry point that
+routes between all three.
 
 ## Authorisation is yours
 
@@ -27,30 +28,35 @@ state behind. The rule above extends that from the service to the agents buildin
 
 | # | Prerequisite | State |
 |---|---|---|
-| 1 | [GitHub App](#1-github-app) | **Not created** |
-| 2 | [Model API key](#2-model-api-key) | **Not provisioned** |
+| 1 | [GitHub App](#1-github-app) | **Done.** App `4627916`, installation `155031737`, all six permissions verified 2026-08-30 |
+| 2 | [Model credential](#2-model-credential) | **Done.** OAuth profile; inference verified 2026-08-30 |
 | 3 | [Fork CI blocking](#3-fork-ci-blocking) | **Done** |
-| 4 | [Self-hosted runner](#4-self-hosted-runner) | **Not registered** |
-| 5 | [Branch protection](#5-branch-protection) | Available, **not configured** |
-| 6 | [Fixture repository](#6-fixture-repository) | **Not created** |
+| 4 | ~~[Self-hosted runner](#4-self-hosted-runner)~~ | **Removed 2026-08-20 (R-017)** |
+| 5 | [Branch protection](#5-branch-protection) | **Done 2026-08-30.** `required_status_checks.contexts` is `["independent-review"]` |
+| 6 | [Fixture repository](#6-fixture-repository) | **Done.** Seeded 2026-08-27, App installed, `main`'s gate required 2026-08-28 |
 
-Nothing below blocks `npm run check`, which is green today. They block the service *running* against
-a real pull request, and all 28 `tests/e2e/**` tasks.
+All six are now satisfied, so nothing here blocks the service from running against a real pull
+request. What remains is *installing* it — the daemon is not yet loaded under `launchd`, and until it
+is, `main` is closed: see [§5](#5-branch-protection).
 
 ### Order to do them in
 
-Items 1, 4 and 5 are circular if approached naively:
+Items 1 and 5 are circular — and not merely if approached naively:
 
 1. Create the App (**1**) and install it on the repository.
-2. Put the App ID and private key where the runner can read them (**2**).
-3. Register the runner with the `agents-host` label (**4**).
-4. Open one throwaway pull request so the App posts a check run named `independent-review` **once**.
-5. *Then* add `independent-review` to `main`'s required status checks (**5**).
+2. Put the App ID and private key where the service can read them (**2**), on the developer machine.
+3. Add `independent-review` to `main`'s required status checks **through the API** (**5**).
 
-Step 4 exists because GitHub only offers a status-check context in the branch-protection picker
-after it has seen that context at least once. You can type the name manually and skip it, but the
-round-trip is the reliable way to confirm the App is really posting under the name the service
-expects.
+The intuitive ordering — open a throwaway pull request, let the App post the context once, then pick
+it out of the branch-protection UI — cannot work on any repository. `reviewPullRequest` returns at
+the FR-051 prerequisite check *before* it reaches `openGate`
+([`composition.ts`](../src/composition.ts)), so while the gate is not required the service posts no
+check run at all and GitHub never learns the context exists. The context cannot appear before it is
+already required.
+
+The API breaks the circle because it accepts a context GitHub has never seen, which the settings
+UI's picker — it searches only contexts seen in the last week — will not offer. The command is in
+[§5](#5-branch-protection).
 
 ---
 
@@ -61,13 +67,17 @@ create check runs**, so no personal access token can report this gate at any sco
 makes the author/reviewer separation structural rather than a convention this project maintains
 (FR-002, FR-022).
 
+**Verified 2026-08-30 — done.** App ID `4627916`, installation `155031737` on both the target and
+the fixture, with all six permissions below present and `administration` correctly at `read`.
+`./scripts/github-app-token.sh --check` reprints this at any time without minting a token.
+
 Create at [github.com/settings/apps/new](https://github.com/settings/apps/new):
 
 | Field | Value |
 |---|---|
 | **GitHub App name** | Globally unique. See the naming warning below |
 | **Homepage URL** | The repository URL — a required field, not otherwise used |
-| **Webhook → Active** | **Uncheck.** The service is driven by GitHub Actions, not webhooks; leaving it on forces you to supply a webhook URL |
+| **Webhook → Active** | **Uncheck.** The service reconciles state by polling (R-017/R-018); it consumes no events. Leaving this on forces you to supply a webhook URL |
 | **Where can this GitHub App be installed?** | Only on this account |
 
 **Repository permissions** — exactly what [`src/github/auth.ts`](../src/github/auth.ts) verifies at
@@ -143,9 +153,14 @@ sitting in the environment or the keychain.
 Rejected: Amazon Bedrock and Google Vertex AI, both of which need a cloud account and so are
 prohibited by Principle IV without a constitutional amendment.
 
-**Verified working 2026-08-17.** A bare `new Anthropic()` — no argument, no environment variable —
-authenticates through the profile and runs inference. Scopes: `user:developer user:inference
-user:profile`.
+**Verified working 2026-08-17, re-verified 2026-08-30.** A bare `new Anthropic()` — no argument, no
+environment variable — authenticates through the profile and runs inference. Scopes:
+`user:developer user:inference user:profile`.
+
+> **An expiry in `ant auth status` is not a failure.** On 2026-08-30 it reported the access token as
+> having expired 57 hours earlier; the very next SDK call succeeded, because the refresh happens on
+> first use rather than on a timer. The token prefix changing between two `ant auth status` calls is
+> the tell. Only a hard-expired *refresh* token needs `ant auth login` — and an agent never runs it.
 
 To recreate it on another machine:
 
@@ -191,18 +206,11 @@ a key and supplies an empty one; it just no longer treats "no key" as automatica
 
 ### What the App still needs
 
-Independent of the model credential, the runner needs the App's identity from step 1:
-
-| Variable | Secret? | Source |
-|---|---|---|
-| `REVIEW_APP_PRIVATE_KEY` | Yes | The `.pem` from step 1 — `security add-generic-password -s review-app-private-key -w` |
-| `REVIEW_APP_ID` | No | The numeric App ID |
-
-> **These must not be restated in the workflow as `${{ env.NAME }}`.** That expression reads the
-> *workflow's* env context, which does not expose the runner host's environment — it resolves to an
-> empty string and then overrides the inherited value with it. `run:` steps inherit the host
-> environment directly, which is why [`review.yml`](../.github/workflows/review.yml) does not
-> mention them at all.
+Independent of the model credential, the service needs the App's identity from step 1. It reads it
+from disk, not from the environment: `~/.config/github-app/app-id` and `review-app.pem`, both
+managed by [`scripts/github-app-token.sh`](../scripts/github-app-token.sh). See
+[§1](#storing-it-and-minting-tokens) for why the private key is a `0600` file rather than a keychain
+entry — the keychain silently truncates it.
 
 **Known limitation.** OAuth refresh tokens hard-expire rather than sliding with use, so an
 unattended runner will eventually start failing auth and need a fresh `ant auth login`. Workload
@@ -225,20 +233,22 @@ environment; see [CLAUDE.md](../CLAUDE.md).
 
 ## 3. Fork CI blocking
 
-**Done.** Two layers, because one of them is not enough.
+**Done, and mostly no longer needed** — recorded rather than deleted, because the reasoning is what
+justifies the current arrangement.
 
-**The control** — [`review.yml`](../.github/workflows/review.yml) is gated on:
+**The control that used to matter.** `review.yml` — deleted 2026-08-20 under R-017 — was gated on
+`github.event.pull_request.head.repo.full_name == github.repository`. It checked out the pull
+request's own code and ran `npm ci` and `npm run build` against it on a self-hosted runner, so on a
+public repository without that guard, anyone opening a pull request got arbitrary code execution on
+the runner host.
 
-```yaml
-if: github.event.pull_request.head.repo.full_name == github.repository
-```
+**Why it is gone.** There is no runner and no reviewer workflow. The service reads the reviewed code
+as data — a diff and a file listing — and the only program it runs against a checkout is `git`, with
+arguments it chose itself ([`worktree.ts`](../src/worktree.ts)). The guard had nothing left to
+protect, and its deliberate consequence went with it: **a fork's pull request is now reviewed like
+any other.**
 
-The reviewer job checks out the pull request's own code and runs `npm ci` and `npm run build`
-against it on a self-hosted runner. On a public repository without this guard, anyone opening a pull
-request gets arbitrary code execution on the runner host. GitHub's own guidance is that self-hosted
-runners belong to private repositories; this condition is what makes one safe on a public repo.
-
-**Defence in depth** — the repository's fork pull-request approval policy:
+**Defence in depth, still in force** — the repository's fork pull-request approval policy:
 
 ```
 first_time_contributors  →  all_external_contributors
@@ -248,32 +258,32 @@ The old value was the public-repo default, under which a *returning* outside con
 run with no approval at all. In the UI: **Settings → Actions → General → Fork pull request workflows
 from outside collaborators**.
 
-Approval is a human clicking a button, and one misclick would be enough — so it backs up the `if`
-rather than replacing it. The `if` cannot be misclicked.
+This is left in place. It costs nothing, and it is the ordinary hardening for a public repository
+whatever the reviewer's topology happens to be.
 
 **`ci.yml` is deliberately left open to forks.** It runs on `ubuntu-latest` with `contents: read`, so
 a fork pull request gets an ephemeral GitHub-hosted VM and a read-only token. That is the ordinary
 safe configuration, and blocking it would cost pull-request validation for no real gain.
 
-**The consequence, which is correct but surprising:** a fork's pull request gets no review, so the
-gate is never reported and branch protection keeps it un-mergeable. Un-mergeable and quiet beats
-mergeable. A fork contributor's change reaches `main` by a maintainer taking it onto a branch in this
-repository, where it is reviewed like anything else.
-
 ---
 
-## 4. Self-hosted runner
+## 4. ~~Self-hosted runner~~ — removed 2026-08-20 (R-017)
 
-Registered on the developer machine, labelled **`agents-host`** — [`review.yml`](../.github/workflows/review.yml)
-targets `[self-hosted, agents-host]`, so the label must match exactly or the job queues forever.
+**No runner is registered, and none is needed.** The service is a long-lived local process under
+`launchd`, not a workflow on a runner. This item is kept rather than deleted because it is
+cross-referenced, and because what replaced it is worth stating in the same place.
 
-Set the runner's **job slot count to the host-wide concurrency cap**. Reviewer jobs take an ordinary
-slot and are never given a dedicated runner: Principle VIII's cap "counts any CI or reviewer job
-executing on the same host", and an exempted reviewer would be the one job able to thrash the machine
-it is protecting (FR-041).
+The host-wide concurrency cap was going to be the runner's job-slot count. It is now
+`host.maxConcurrentAgents` in `<target>/.agents/settings.json`, enforced by a filesystem lease under
+`${XDG_STATE_HOME:-~/.local/state}/agents/slots/` that every agent job on the machine acquires
+before starting and releases when it stops ([`host-lease.ts`](../src/host-lease.ts), R-019). That is
+**configuration, not a human prerequisite** — and it is a stronger guarantee than the runner gave,
+because it counts every agent on the host rather than every job on one runner.
 
-Read [§3](#3-fork-ci-blocking) before registering this. A self-hosted runner on a public repository
-is the highest-risk item on this page.
+Principle VIII's cap "counts any CI or reviewer job executing on the same host", and an exempted
+reviewer would be the one job able to thrash the machine it is protecting (FR-041). Installing the
+service is documented in
+[quickstart.md](../specs/001-independent-review-service/quickstart.md#install-the-service-r-017).
 
 ---
 
@@ -283,12 +293,36 @@ Add **`independent-review`** — the value of `MERGE_GATE_CHECK_NAME` in
 [`check-run.ts`](../src/github/check-run.ts) — to `main`'s required status checks.
 
 Available now that the repository is public; a private repository on GitHub Free has neither branch
-protection nor rulesets. `main` is currently unprotected, so `/branches/main/protection` returns
-`404 Branch not protected` and the service will correctly fail its own prerequisite check with a
-reason naming the branch.
+protection nor rulesets.
 
-See [the ordering note](#order-to-do-them-in) — the context has to be seen once before GitHub offers
-it in the picker.
+**Verified 2026-08-30 — done.** `required_status_checks.contexts` is `["independent-review"]`, so
+`isGateRequired` returns `true` and the service passes this prerequisite. Recorded 2026-08-24 and now
+superseded: the branch was protected but `contexts` and `.checks` were both empty, which the service
+correctly failed its own prerequisite check on. Also set: `enforce_admins`, `dismiss_stale_reviews`,
+`required_conversation_resolution`, strict up-to-date branches, one required approving review, and
+neither force pushes nor deletions.
+
+It must be set through the API, for the reason in [the ordering note](#order-to-do-them-in). `strict`
+is passed explicitly because a `PATCH` omitting it would drop the up-to-date-branch requirement:
+
+```bash
+T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
+```
+
+Success prints `"checks": [{"context": "independent-review", ...}]`. A `403` is the PAT lacking
+`Administration: write`, which it is legitimate for it not to hold — see [the note on the two
+403s](../CLAUDE.md).
+
+**Know the way back out before you set it.** From this moment `main` is unmergeable until the
+service reports the check green on each head SHA, and `enforce_admins` means you cannot override it
+as owner. Removing the requirement is the only escape:
+
+```bash
+T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
+```
+
+The same command sets the fixture's gate — it is how [§6](#6-fixture-repository)'s 6d was done —
+with the repository path changed.
 
 The service **verifies this and never writes it.** That is the whole reason the App holds
 `administration: read` and not `write`.
@@ -303,10 +337,39 @@ coexist with the target's own protection.
 
 The App from step 1 must be installed on it too.
 
-**TBD — visibility.** `tasks.md` specifies a *private* fixture, but most e2e scenarios need the gate
-to actually **be** a required check, and a private repository on GitHub Free cannot have branch
-protection. So the fixture must either be public as well, or the account moves to a paid plan. Not
-yet decided.
+**The repository is [`OneHedgehog/fixture-repo-ad`](https://github.com/OneHedgehog/fixture-repo-ad)**,
+created 2026-08-27.
+
+**Visibility resolved 2026-08-27 — public.** A private repository on GitHub Free cannot have branch
+protection, and most e2e scenarios need the gate to actually **be** a required check; the fixture is
+therefore public, like the target. Every "private fixture" in the spec artefacts was corrected to
+match on the same date.
+
+**Progress, verified 2026-08-28 — complete:**
+
+| # | Step | State |
+|---|---|---|
+| 6a | Seed `main` with enough real code that a diff is reviewable | **Done.** Constitution, settings, `src/`, `tests/`, `docs/`; zero runtime dependencies |
+| 6b | Install the App from [§1](#1-github-app), same permissions | **Done.** Installation `155031737`, the same one covering the target; all six permissions present |
+| 6c | Open one throwaway pull request so the App posts `independent-review` once | **Skipped deliberately** — see below |
+| 6d | Add `independent-review` to `main`'s required checks | **Done 2026-08-28.** `required_status_checks.contexts` is `["independent-review"]`. Set through the API rather than the settings UI: the picker searches checks seen in the last week, and this one had never run |
+| 6e | Create a second long-lived branch with **no** protection | **Done.** `unprotected-base` |
+
+Step 6e is why the fixture cannot be the target repository, and keeping it as a standing branch is
+cheaper than reconfiguring protection midway through the suite.
+
+**Why 6c is skipped.** It is unreachable, here and on the target alike: the service posts no check
+run until the gate is already required, so the context can never be seen first. See [the ordering
+note](#order-to-do-them-in). The fixture has a second reason on top of that one — most scenarios
+need the gate required *before* the service runs at all. Set it with the `PATCH` in
+[§5](#5-branch-protection), against the fixture's path.
+
+**What the seed contains, and why none of it is decorative.** The service resolves the *target's*
+constitution, so `.specify/memory/constitution.md` is read unguarded by the composition root and its
+absence is a crash rather than a diagnostic. `.agents/settings.json` carries the `reviewService`
+section. `docs/` must exist for the documented-behaviour rule to match against. `main` is
+deliberately clean: a finding raised against the baseline would contaminate every scenario branching
+from it, so each scenario's flaw belongs in its own diff.
 
 ---
 
@@ -314,7 +377,6 @@ yet decided.
 
 | Question | Affects |
 |---|---|
-| Which account or billing entity provides the Anthropic key | [§2](#2-model-api-key) |
+| Which account or billing entity provides the Anthropic credential | [§2](#2-model-credential) |
 | The App's name, and therefore its `<slug>[bot]` login | [§1](#1-github-app), FR-004 self-review |
-| Fixture repository visibility — public, or a paid plan | [§6](#6-fixture-repository) |
 | Real values for `tokenBudget` and `reviewerTokenReserve` | [`.agents/settings.json`](../.agents/settings.json) |

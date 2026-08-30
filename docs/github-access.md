@@ -4,40 +4,44 @@ How an agent working *on* this repository reaches GitHub, and why its token is d
 than the review service's own identity.
 
 This is developer and operator setup. It is not the independent review service's feature document —
-that is `docs/independent-review-service.md`, which ships with the feature itself (Principle IX).
+that is [independent-review-service.md](independent-review-service.md), which ships with the feature
+itself (Principle IX). If you arrived here first, the [README](../README.md) is the entry point.
 
 ## The repositories
 
 | Role | Repository | State |
 |---|---|---|
-| **Target** — what this working tree pushes to, and what the service reviews | [`OneHedgehog/claude-code-agent-team`](https://github.com/OneHedgehog/claude-code-agent-team) | Private, empty, default branch `main`. Wired as `origin`. |
+| **Target** — what this working tree pushes to, and what the service reviews | [`OneHedgehog/claude-code-agent-team`](https://github.com/OneHedgehog/claude-code-agent-team) | **Public**, default branch `main`, protected. Wired as `origin` over SSH. |
 | **Fixture** — private repo the e2e suite drives (R-015) | not created | Human prerequisite; see [What stays human](#what-stays-human) |
 
-### Blocker: branch protection is unavailable on the target
+### ~~Blocker: branch protection is unavailable on the target~~ — resolved
 
-`OneHedgehog` is on **GitHub Free** and the target repository is **private**. Both the branch
-protection and the rulesets endpoints return:
+**Resolved by making the target repository public.** Kept here because it is why
+[`branch-protection.ts`](../src/github/branch-protection.ts) classifies two different `403`s instead
+of one.
+
+While `OneHedgehog` was on **GitHub Free** with the target **private**, both the branch protection
+and the rulesets endpoints returned:
 
 ```
 403  Upgrade to GitHub Pro or make this repository public to enable this feature.
 ```
 
-This is a *plan* limitation, not a token permission — the same token reads metadata, contents, pull
-requests, issues, actions, and checks on this repository without complaint.
+That is a *plan* limitation, not a token permission — the same token read metadata, contents, pull
+requests, issues, actions, and checks on the repository without complaint. It blocked the feature's
+central premise: quickstart prerequisite 3 requires branch protection making the reviewer check run
+required, FR-051 verifies exactly that before every review, and a missing required check maps to
+`failure` + escalate + zero spend, so the service would have refused to review anything, forever.
 
-It blocks the feature's central premise. Quickstart prerequisite 3 requires branch protection making
-the reviewer check run required, and FR-051 verifies exactly that before every review. Under the
-contract's own conclusion mapping a missing required check is `failure` + escalate + zero spend, so
-the service would refuse to review anything, forever. Resolve before implementation, by one of:
+**Current state, verified 2026-08-24**: the repository is public, `/branches/main/protection`
+returns `200`, and `main` is protected — but `required_status_checks.contexts` and `.checks` are
+both empty, so `independent-review` is not yet a required check. Adding that context is the one
+remaining human step; see [prerequisites.md §5](prerequisites.md#5-branch-protection).
 
-- **Make the target repository public** — free, and branch protection becomes available immediately
-- **Upgrade to GitHub Pro** — keeps the repository private
-- **Move it into an organization** on Team or above
-
-Note for [contracts/github-surface.md](../specs/001-independent-review-service/contracts/github-surface.md):
-that document reads a `403` on the protection endpoint as "the installation lacks
-`administration: read`". That diagnosis is incomplete — a `403` also means the plan does not offer
-the feature, and the two need distinguishing in the message the gate reports.
+The lesson this left in the contract: reading a `403` on the protection endpoint as "the
+installation lacks `administration: read`" is incomplete — a `403` also means the plan does not
+offer the feature, and the two are distinguished in the message the gate reports. See
+[contracts/github-surface.md](../specs/001-independent-review-service/contracts/github-surface.md).
 
 ## Two identities, and why they must stay apart
 
@@ -85,12 +89,13 @@ than in anticipation of one.
 | Checks | **Read** | **Read** | The e2e harness must read the gate's conclusion to assert on it |
 | Issues | Read | Read and write | Verify escalation issues; the fixture also needs teardown |
 | Administration | **none** | Read and write | Toggling branch protection is the *fixture* for the missing-protection scenario; on the target it would let the gate be removed |
-| Actions | none | Read | Optional — only if the harness inspects workflow-run timing for the queue-wait scenarios |
+| Actions | none | Read | Optional. Was for inspecting workflow-run timing in the queue-wait scenarios; under R-017 the wait is measured from the enqueuing tick, and there is no workflow run to read |
 
 **The Workflows trap**: without `Workflows: Read and write`, GitHub rejects any push that touches
 `.github/workflows/**` — and it rejects the entire push, not just that file. If you would rather keep
-workflow files under human control, leave the permission off and commit `ci.yml` and `review.yml`
-yourself.
+workflow files under human control, leave the permission off and commit `ci.yml` yourself. (There
+is only `ci.yml`: the reviewer workflow was deleted under R-017, and the service runs as a local
+process instead.)
 
 **Tuning**: grant this set, then narrow on evidence. When something returns `403`, the endpoint in
 the error names the missing permission exactly. Starting tight and widening on a specific failure
