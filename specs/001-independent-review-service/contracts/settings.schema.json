@@ -2,16 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/agents-coding-team/schemas/settings.schema.json",
   "title": "Agent operating settings",
-  "description": "Version-controlled operating settings read from <target>/.agents/settings.json. The file is shared by every agent working on the target repository, each under its own top-level section (FR-050): this service validates the `reviewService` section strictly and ignores sibling sections belonging to other agents. Within that section, a missing or invalid REQUIRED setting stops the run (FR-028) and an unrecognized key stops the run (FR-050), while a missing OPTIONAL setting is filled from the documented `default` here and its effective value is reported with the run (FR-054).",
+  "description": "Version-controlled operating settings read from <target>/.agents/settings.json. The file is shared by every agent working on the target repository, each under its own top-level section (FR-050): this service validates the `reviewService` section strictly and ignores sibling sections belonging to other agents. Within that section, a missing or invalid REQUIRED setting stops the run (FR-028) and an unrecognized key stops the run (FR-050), while a missing OPTIONAL setting is filled from the documented `default` here and its effective value is reported with the run (FR-054). The `host` section is the exception that proves the rule: it belongs to no single agent, so it cannot sit inside one's namespace, and this service validates it as strictly as its own (research.md R-019).",
   "type": "object",
   "additionalProperties": true,
-  "required": ["reviewService"],
+  "required": ["reviewService", "host"],
   "properties": {
     "reviewService": {
       "$ref": "#/$defs/reviewServiceSettings"
+    },
+    "host": {
+      "$ref": "#/$defs/hostSettings"
     }
   },
   "$defs": {
+    "hostSettings": {
+      "title": "Shared host settings",
+      "description": "Settings belonging to the machine rather than to any one agent. Every agent on the host reads this section and validates it strictly; none of them owns it. Principle VIII's concurrency cap is the first such setting: it is global across every in-flight feature and task combined, and it counts any CI or reviewer job on the same host, so a cap held inside one agent's namespace — or inside one process's memory — could never satisfy it (research.md R-019).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxConcurrentAgents"],
+      "properties": {
+        "maxConcurrentAgents": {
+          "description": "Maximum agent jobs running concurrently on this host, enforced by a filesystem lease under ${XDG_STATE_HOME:-~/.local/state}/agents/slots/ that every agent acquires before starting work and releases when it stops. Required.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 2
+        }
+      }
+    },
+
     "reviewServiceSettings": {
       "title": "Independent review service settings",
       "description": "This service's own section. Validated strictly: `additionalProperties: false` makes an unrecognized key an error that stops the run, because a silently ignored typo in a budget or a threshold is indistinguishable from a setting that was never applied (FR-050).",
@@ -30,9 +49,11 @@
         "platformApiReserve",
         "maxRateLimitWaitSeconds",
         "maxQueueWaitSeconds",
-        "escalationChannel"
+        "escalationChannel",
+        "pollIntervalSeconds",
+        "maxConcurrentReviews"
       ],
-      "$comment": "Cross-field invariants are not expressible in JSON Schema and are enforced in code immediately after schema validation, with the same stop-the-run consequence: reviewerTokenReserve < tokenBudget; platformApiReserve < platformApiBudget; maxReviewableDiffSize > maxPullRequestSize (otherwise FR-043 could never fire).",
+      "$comment": "Cross-field invariants are not expressible in JSON Schema and are enforced in code immediately after schema validation, with the same stop-the-run consequence: reviewerTokenReserve < tokenBudget; platformApiReserve < platformApiBudget; maxReviewableDiffSize > maxPullRequestSize (otherwise FR-043 could never fire); and maxConcurrentReviews <= host.maxConcurrentAgents (R-019 — the reviewer's share can never exceed the host's cap).",
       "properties": {
         "requiredReviewerRoles": {
           "description": "Roles whose approving verdict the merge gate requires (FR-021). Required.",
@@ -130,6 +151,18 @@
               "default": "escalation"
             }
           }
+        },
+        "pollIntervalSeconds": {
+          "description": "How often the daemon reconciles open pull requests against the gate check runs already reported on them (research.md R-017). The listing is a conditional request, so an unchanged one costs no rate limit; this is the latency floor on noticing a push, not a cost knob. Required.",
+          "type": "integer",
+          "minimum": 5,
+          "default": 60
+        },
+        "maxConcurrentReviews": {
+          "description": "Ceiling on the reviewer's SHARE of the host-wide agent cap (R-019). A review must hold both one of these worker slots and a host lease to start, so this can only ever reduce concurrency below host.maxConcurrentAgents, never raise it. Required. Must not exceed host.maxConcurrentAgents.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
         },
         "modelEffort": {
           "description": "OPTIONAL (FR-054) — depth/cost trade-off passed to the model boundary. Absent, the documented default below is applied rather than stopping the run, and the effective value is reported with the run so that no behavior depends on a value nobody can see.",
