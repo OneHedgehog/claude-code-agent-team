@@ -329,49 +329,27 @@ The service **verifies this and never writes it.** That is the whole reason the 
 
 ### The bootstrap exception, 2026-08-30
 
-The gate could not review its own introduction. The **authority** for the waiver — what was
-overridden, by whom, and why — is recorded in
-[specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), which is never rewritten.
-Principle VI requires a waived finding to carry a recorded, human-approved reason, and this page is
-rewritten whenever a prerequisite changes, so it is the wrong home for one. What follows is the
-operational summary.
+The gate could not review its own introduction. `main` took one merge under an `enforce_admins`
+bypass, which was restored immediately afterwards.
 
-[#1](https://github.com/OneHedgehog/claude-code-agent-team/pull/1) carried the whole service --
-composition root, daemon, host lease, worktree, e2e suite, specs, docs. The service reviewed it and
-**refused it correctly**: 11,935 changed lines against a `maxReviewableDiffSize` of 2,000 (FR-037),
-no review attempted, **zero model tokens spent**, the reason stated on the pull request, and
-escalation issue #2 opened. Its first real run was a refusal of its own author, which is the system
-working.
+**The authority for that waiver — what was overridden, by whom, when, why, and what it leaves
+unreviewed — is [specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), and only
+there.** This page is rewritten whenever a prerequisite changes; a spec never is, which is where
+Principle VI's recorded, human-approved reason belongs. Nothing below restates it, so the two
+cannot drift apart.
 
-That refusal is not escapable, and deliberately so. FR-043's `## Size justification` clears the
-400-line discipline cap; FR-037 has no such escape, because a diff too large to review is not made
-reviewable by explaining itself. So the pull request introducing FR-037 was necessarily larger than
-FR-037 permits.
+What this page owes you is the operational half — what to check, and how. The protection should
+read back exactly as the spec records it: `enforce_admins.enabled` true,
+`required_status_checks.checks` `["independent-review"]`, and `required_approving_review_count` 1.
 
-**Dropping the required check would not have been enough.** `main` also requires one approving
-review, and GitHub does not permit approving your own pull request -- unsatisfiable for a sole
-author regardless of the gate. The minimal override was therefore `enforce_admins`: disabled,
-merged as admin, re-enabled. The gate's configuration -- the required context and the review count
--- was never changed, so the exception is recorded as an admin bypass rather than as a weakened
-gate.
+```bash
+T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
+```
 
-**Verified after restoring:** `enforce_admins.enabled` is `true`, `required_status_checks.checks` is
-`["independent-review"]`, `required_approving_review_count` is `1`.
+The commands that add and remove the gate itself are in [§5](#5-branch-protection) above.
 
-**Approved by, and what that approval covered.** The bypass and the merge were performed by
-[@OneHedgehog](https://github.com/OneHedgehog), the repository owner and the human Principle V
-requires to approve an establishing commit. The approval was given in the open, on the reasoning
-recorded above.
-
-**What a future reader most needs to know:** those 11,935 lines reached `main` with **no reviewer
-findings against them at all**. The service never examined the change -- it refused it on size
-before any role ran, so nothing in that merge has been reviewed by anything but a human reading it.
-Everything merged before this record is unreviewed by construction, and #3 is the first change this
-repository put through its own gate.
-
-**This is not a precedent.** It applies once, to the change that introduced the gate. A later pull
-request over the reviewable limit gets split, which is what FR-037 asks for and what the seven
-commits on that branch were already shaped for.
+**The waiver is spent.** It applied once, to the change that introduced the gate. A later pull
+request over the reviewable limit is split, which is what FR-037 asks for.
 
 ---
 
