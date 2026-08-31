@@ -346,7 +346,7 @@ read back exactly as the spec records it: `enforce_admins.enabled` true,
 T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
 ```
 
-The commands that add and remove the gate itself are in [§5](#5-branch-protection) above.
+The commands that add and remove the gate itself are earlier in this section.
 
 **The waiver is spent.** It applied once, to the change that introduced the gate. A later pull
 request over the reviewable limit is split, which is what FR-037 asks for.
