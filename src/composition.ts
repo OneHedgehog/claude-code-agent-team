@@ -932,15 +932,20 @@ export async function reviewPullRequest(
     });
   }
 
-  // Two different numbers that used to be one, which is why a review could never reach the model.
+  // Two numbers that used to be one, and must not become independent either.
   //
-  // `maxTokens` is what a single response may *emit* -- the model's own limit, and nothing to do
-  // with what the run is allowed to spend. `reservation` is the budget check: a deliberately
-  // conservative per-role ceiling drawn from `reviewerTokenReserve`, which counts input, output,
-  // and every round. Deriving the first from the second asked for 1.25M output tokens and failed
-  // every call before it was sent.
-  const maxTokens = MAX_OUTPUT_TOKENS;
+  // `reservation` is the budget check: a conservative per-role ceiling drawn from
+  // `reviewerTokenReserve`. `maxTokens` is what a single response may *emit*. Deriving the second
+  // from the first asked for 1.25M output tokens -- past what any model emits -- and failed every
+  // call before it was sent. But simply replacing it with the model's own ceiling broke the other
+  // direction: with a `reviewerTokenReserve` under 64,000, a response could emit more than the
+  // ledger had authorised, and Principle IV requires a metered resource to be checked *before* the
+  // work that consumes it.
+  //
+  // The lower of the two satisfies both. A response can never exceed what the model will produce,
+  // and never exceed what was reserved for it.
   const reservation = Math.max(1, Math.floor(operating.reviewerTokenReserve / 4));
+  const maxTokens = Math.min(MAX_OUTPUT_TOKENS, reservation);
 
   // checkingBudgets (FR-031, FR-047). The estimate is the per-role ceiling times the roles that run.
   const budget = adapters.ledger.check(

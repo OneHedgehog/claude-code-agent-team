@@ -188,6 +188,30 @@ with every run.
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
+**A response is capped by the lower of the model's ceiling and the budget reserved for it.** A single
+response may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that
+stays inside the SDK's HTTP timeout -- and never more than the per-role reservation drawn from
+`reviewerTokenReserve`. The two bounds answer different questions and both have been got wrong once:
+passing the reservation straight through asked for 1.25M output tokens and the SDK refused the call
+outright, while using the model's ceiling alone let a response emit more than the ledger had
+authorised whenever `reviewerTokenReserve` was under 64,000. A caller asking for more than either is
+clamped rather than trusted, because the failure otherwise arrives as a vague streaming error rather
+than as anything naming the arithmetic.
+
+**A finding's location arrives flat and becomes a union at the boundary.** Structured outputs rejects
+`oneOf` -- "Schema type 'oneOf' is not supported" -- so the wire schema carries one object with a
+`pullRequestLevel` discriminant and three fields that are ignored when it is set. `normalizeLocation`
+restores the discriminated union, and everything downstream still sees `FindingLocation`.
+
+That conversion is also where a location is *validated*, since a flat schema cannot require a
+non-empty path on a field that pull-request-level findings leave blank. A location claiming a place
+in the diff is downgraded to pull-request level when its path is empty, absolute, or contains a `..`
+segment, or when its line is before the first. The finding survives either way -- a finding that
+cannot be placed is still a finding (FR-014) -- but it never carries a path the service would not
+have accepted. Traversal is refused here even though `config/target.ts` would refuse it later:
+model output is untrusted data, and a guard that relies on something downstream catching it is one
+refactor away from not being a guard.
+
 **The gate never reports `neutral`, `skipped`, or `cancelled`.** GitHub treats the first two as
 non-failing, which is exactly the absent gate that reads as no objection. Every inability to review
 is a `failure` with a reason. A run still waiting reports nothing at all rather than reporting

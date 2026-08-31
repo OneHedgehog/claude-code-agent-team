@@ -38,6 +38,7 @@
         "platform.reserve_reached",
         "platform.wait_started",
         "platform.wait_ended",
+        "tick.completed",
         "queue.wait_started",
         "queue.wait_exceeded",
         "role.started",
@@ -70,6 +71,41 @@
     },
     "role": { "enum": ["security", "implementation"] },
     "verdict": { "enum": ["approve", "request-changes"] },
+    "tick": {
+      "description": "The daemon's per-tick heartbeat (Principle VII). Every other event is conditional, so without one unconditional record per tick a correctly idle daemon and a dead one produce identical output: none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unchanged", "considered", "selected", "skipped"],
+      "properties": {
+        "unchanged": {
+          "description": "True when the listing answered 304: nothing changed, and it cost no rate limit (FR-040).",
+          "type": "boolean"
+        },
+        "considered": {
+          "description": "Open pull requests the reconciliation predicate examined this tick.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected": {
+          "description": "How many of those were selected for review.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "description": "Those not selected, each with the cheap condition that excluded it.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pullRequest", "reason"],
+            "properties": {
+              "pullRequest": { "type": "integer", "minimum": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "prerequisites": {
       "description": "Startup verification of the service's own preconditions (FR-051). Emitted before any model tokens are spent; a missing prerequisite fails the gate naming it and escalates.",
       "type": "object",

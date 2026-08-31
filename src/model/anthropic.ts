@@ -316,9 +316,29 @@ type WireResponse = Omit<Omit<ReviewResponse, "usage">, "findings"> & {
  */
 function normalizeLocation(location: WireLocation): FindingLocation {
   if (location.pullRequestLevel) return { pullRequestLevel: true };
-  if (location.path.trim() === "" || location.line < 1) return { pullRequestLevel: true };
+  if (!isUsablePath(location.path) || location.line < 1) return { pullRequestLevel: true };
 
   return { path: location.path, line: location.line, side: location.side };
+}
+
+/**
+ * Whether a path the model produced may be used to anchor a comment.
+ *
+ * The flat schema cannot carry `minLength` on a field that a pull-request-level finding leaves
+ * empty, so the constraint the `oneOf` used to enforce is enforced here instead -- at the same
+ * boundary, in code rather than in JSON Schema.
+ *
+ * Traversal is rejected here even though `locations.ts` would refuse to address it anyway. Model
+ * output is untrusted data (Principle V), and a boundary that passes `../../etc/passwd` through on
+ * the grounds that something downstream will catch it is one refactor away from being wrong.
+ */
+function isUsablePath(path: string): boolean {
+  const trimmed = path.trim();
+
+  if (trimmed === "") return false;
+  if (trimmed.startsWith("/")) return false;
+
+  return !trimmed.split("/").includes("..");
 }
 
 function readUsage(response: unknown): ModelUsage {

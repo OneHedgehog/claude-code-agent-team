@@ -173,8 +173,10 @@ describe("model output is consumed only through its schema (FR-036)", () => {
   });
 
   it("does not let a response path field escape the target checkout", () => {
-    // A location path is used to anchor a comment, never to open a file — but if that ever
-    // changes, this is the assertion that catches it.
+    // A location path anchors a comment and never opens a file, and `config/target.ts` would refuse
+    // an escaping path anyway. It is still refused *here*, at the boundary where model output stops
+    // being untrusted data: a guard that depends on what happens downstream is one refactor away
+    // from not being a guard.
     const parsed = parseReviewResponse({
       verdict: "request-changes",
       findings: [
@@ -189,9 +191,26 @@ describe("model output is consumed only through its schema (FR-036)", () => {
       replyJudgements: [],
     });
 
-    const location = parsed.findings[0]?.location;
-    expect(location && "path" in location ? location.path : "").toBe("../../etc/passwd");
-    // Consumed as an opaque label for a comment anchor; nothing here resolves it against a
-    // filesystem. `config/target.ts` is the only module that resolves paths, and it rejects escapes.
+    // The finding survives -- it is still a finding (FR-014) -- but it carries no traversal path.
+    expect(parsed.findings).toHaveLength(1);
+    expect(parsed.findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("refuses an absolute path the same way", () => {
+    const parsed = parseReviewResponse({
+      verdict: "request-changes",
+      findings: [
+        {
+          rule: "r",
+          severity: "high",
+          blocking: true,
+          location: { pullRequestLevel: false, path: "/etc/passwd", line: 1, side: "RIGHT" },
+          description: "d",
+        },
+      ],
+      replyJudgements: [],
+    });
+
+    expect(parsed.findings[0]?.location).toEqual({ pullRequestLevel: true });
   });
 });
