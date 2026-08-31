@@ -12,6 +12,7 @@ import {
   type ComposeOptions,
 } from "../../src/composition.js";
 import { createTarget } from "../../src/config/target.js";
+import { runDaemon } from "../../src/daemon.js";
 import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
@@ -608,5 +609,46 @@ describe("what the root wires to the real adapter (Principle II)", () => {
         .map((line) => JSON.parse(line) as { event: string })
         .filter((r) => r.event === "location.rejected"),
     ).toEqual([]);
+describe("the daemon's heartbeat (Principle VII)", () => {
+  /** Runs exactly one tick body: `runDaemon` consults `running()` once to enter and once to loop. */
+  function oneTick(): () => boolean {
+    let calls = 0;
+
+    return () => {
+      calls += 1;
+
+      return calls === 1;
+    };
+  }
+
+  it("emits exactly one tick.completed on a tick that selects nothing", async () => {
+    // The motivating case, and the one every other event misses: an idle tick. Every other record
+    // this service writes is conditional, so before this event a daemon idling correctly and a
+    // daemon that had died wrote byte-identical output -- none.
+    const records: string[] = [];
+    const logger = createLogger({
+      runId: "run-daemon",
+      write: (line) => records.push(line),
+    });
+
+    await runDaemon({
+      target: TARGET,
+      compose: () =>
+        composeService({ ...stubs(emptyCalls(), { logger }), graphqlClient: noThreads() }),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+    });
+
+    const heartbeats = records
+      .map((line) => JSON.parse(line) as { event: string; tick?: unknown })
+      .filter((record) => record.event === "tick.completed");
+
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]?.tick).toEqual({
+      unchanged: false,
+      considered: 0,
+      selected: 0,
+      skipped: [],
+    });
   });
 });

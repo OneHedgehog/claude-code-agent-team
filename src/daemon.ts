@@ -454,6 +454,26 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
       },
     });
 
+    // The heartbeat (Principle VII).
+    //
+    // Every branch below this point is conditional -- a tick that selects nothing logs nothing --
+    // so a daemon idling correctly and a daemon that has died produce byte-identical output:
+    // none. That is not a theoretical complaint. This process ran for twenty-four minutes and
+    // then exited, and the only way to tell the difference at any point was `ps`.
+    //
+    // One line per tick, at `info`, costs nothing against FR-040 -- a `304` is free and this is
+    // not even a request -- and turns silence back into a signal.
+    adapters.logger.info("tick.completed", {
+      tick: {
+        unchanged: tick.unchanged,
+        considered: tick.considered.length,
+        selected: tick.selected.length,
+        skipped: tick.considered
+          .filter((selection) => !selection.select)
+          .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason })),
+      },
+    });
+
     etag = tick.etag;
 
     const enqueuedAt = now().toISOString();
