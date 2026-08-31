@@ -353,6 +353,17 @@ gate.
 **Verified after restoring:** `enforce_admins.enabled` is `true`, `required_status_checks.checks` is
 `["independent-review"]`, `required_approving_review_count` is `1`.
 
+**Approved by, and what that approval covered.** The bypass and the merge were performed by
+[@OneHedgehog](https://github.com/OneHedgehog), the repository owner and the human Principle V
+requires to approve an establishing commit. The approval was given in the open, on the reasoning
+recorded above.
+
+**What a future reader most needs to know:** those 11,935 lines reached `main` with **no reviewer
+findings against them at all**. The service never examined the change -- it refused it on size
+before any role ran, so nothing in that merge has been reviewed by anything but a human reading it.
+Everything merged before this record is unreviewed by construction, and #3 is the first change this
+repository put through its own gate.
+
 **This is not a precedent.** It applies once, to the change that introduced the gate. A later pull
 request over the reviewable limit gets split, which is what FR-037 asks for and what the seven
 commits on that branch were already shaped for.
