@@ -329,7 +329,12 @@ The service **verifies this and never writes it.** That is the whole reason the 
 
 ### The bootstrap exception, 2026-08-30
 
-The gate could not review its own introduction, and this is the record of what was done about it.
+The gate could not review its own introduction. The **authority** for the waiver — what was
+overridden, by whom, and why — is recorded in
+[specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), which is never rewritten.
+Principle VI requires a waived finding to carry a recorded, human-approved reason, and this page is
+rewritten whenever a prerequisite changes, so it is the wrong home for one. What follows is the
+operational summary.
 
 [#1](https://github.com/OneHedgehog/claude-code-agent-team/pull/1) carried the whole service --
 composition root, daemon, host lease, worktree, e2e suite, specs, docs. The service reviewed it and
