@@ -14,6 +14,7 @@ import { createTarget } from "../../src/config/target.js";
 import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
+import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
 
@@ -307,6 +308,68 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
     // reviewer's rules block on without ever consulting the model. A run that approved it would
     // mean the rules had not been composed in at all.
     expect(calls.reviewsSubmitted).toContain("REQUEST_CHANGES");
+  });
+
+  it("never lets a response emit more than the ledger authorised (Principle IV)", async () => {
+    // The regression: `max_tokens` began as a slice of the reservation (1.25M -- past what any
+    // model emits, so every call failed), then became the model's own ceiling alone, which crossed
+    // the other way. With a small reserve, 16,000 is *more* than the run was authorised to spend,
+    // and the pre-flight budget check would not notice.
+    let seen = -1;
+    const model: ModelClient = {
+      review: (request) => {
+        seen = request.maxTokens;
+
+        return Promise.resolve({
+          verdict: "approve",
+          findings: [],
+          replyJudgements: [],
+          usage: { inputTokens: 10, outputTokens: 10 },
+        });
+      },
+    };
+
+    const settings: LoadedSettings = {
+      ...SETTINGS,
+      settings: { ...SETTINGS.settings, reviewerTokenReserve: 40_000 },
+    };
+
+    const adapters = await composeService({
+      ...stubs(emptyCalls(), { model, settings }),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-composition" });
+
+    // 40,000 / 4 = 10,000, which is below MAX_OUTPUT_TOKENS and therefore the binding constraint.
+    expect(seen).toBe(10_000);
+    expect(seen).toBeLessThan(MAX_OUTPUT_TOKENS);
+  });
+
+  it("falls back to the model's ceiling when the reservation is the larger of the two", async () => {
+    let seen = -1;
+    const model: ModelClient = {
+      review: (request) => {
+        seen = request.maxTokens;
+
+        return Promise.resolve({
+          verdict: "approve",
+          findings: [],
+          replyJudgements: [],
+          usage: { inputTokens: 10, outputTokens: 10 },
+        });
+      },
+    };
+
+    const adapters = await composeService({
+      ...stubs(emptyCalls(), { model }),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-composition" });
+
+    // The repository's own reserve divides to 1,250,000, so the model's ceiling binds instead.
+    expect(seen).toBe(MAX_OUTPUT_TOKENS);
   });
 
   it("spends against the ledger, so a run's cost is recorded rather than merely incurred", async () => {

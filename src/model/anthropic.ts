@@ -316,9 +316,14 @@ type WireResponse = Omit<Omit<ReviewResponse, "usage">, "findings"> & {
  */
 function normalizeLocation(location: WireLocation): FindingLocation {
   if (location.pullRequestLevel) return { pullRequestLevel: true };
-  if (!isUsablePath(location.path) || location.line < 1) return { pullRequestLevel: true };
 
-  return { path: location.path, line: location.line, side: location.side };
+  // Trimmed once, then both checked and used in that form. Validating one string and using another
+  // is how a guard comes to pass something it never approved.
+  const path = location.path.trim();
+
+  if (!isUsablePath(path) || location.line < 1) return { pullRequestLevel: true };
+
+  return { path, line: location.line, side: location.side };
 }
 
 /**
@@ -333,12 +338,12 @@ function normalizeLocation(location: WireLocation): FindingLocation {
  * the grounds that something downstream will catch it is one refactor away from being wrong.
  */
 function isUsablePath(path: string): boolean {
-  const trimmed = path.trim();
+  if (path === "") return false;
+  if (path.startsWith("/")) return false;
 
-  if (trimmed === "") return false;
-  if (trimmed.startsWith("/")) return false;
-
-  return !trimmed.split("/").includes("..");
+  // Split on both separators: a Windows-style `..\\..` is the same escape wearing a different
+  // delimiter, and a path that only ever anchors a comment is not worth being clever about.
+  return !path.split(/[/\\]/).includes("..");
 }
 
 function readUsage(response: unknown): ModelUsage {

@@ -30,9 +30,6 @@ export const REVIEW_EVENTS = [
   "platform.reserve_reached",
   "platform.wait_started",
   "platform.wait_ended",
-  // The daemon's per-tick heartbeat. Every other event here is conditional, so without this one a
-  // correctly idle daemon and a dead one write byte-identical output: none.
-  "tick.completed",
   "queue.wait_started",
   "queue.wait_exceeded",
   "role.started",
@@ -73,14 +70,6 @@ export interface RecordFields {
     readonly source?: readonly ("vcs-binary" | "declared-pattern")[];
   };
   readonly effectiveOptionalSettings?: Readonly<Record<string, unknown>>;
-  /** The daemon's per-tick heartbeat: what it saw, what it chose, and why it passed on the rest. */
-  readonly tick?: {
-    /** `true` when the listing answered `304` -- nothing changed, and it cost no rate limit. */
-    readonly unchanged: boolean;
-    readonly considered: number;
-    readonly selected: number;
-    readonly skipped: readonly { readonly pullRequest: number; readonly reason: string }[];
-  };
   readonly finding?: {
     readonly id: string;
     readonly severity: "critical" | "high" | "medium" | "low";
