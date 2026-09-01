@@ -984,7 +984,7 @@ export async function reviewPullRequest(
   const maxTokens = MAX_OUTPUT_TOKENS;
   const reservation = estimateReviewTokens(diff.length, maxTokens);
 
-  // checkingBudgets (FR-031, FR-047). The estimate is the per-role ceiling times the roles that run.
+  // checkingBudgets (FR-031, FR-047). One role's estimated cost, times the roles that run.
   const budget = adapters.ledger.check(
     targetSlug(target),
     "review",

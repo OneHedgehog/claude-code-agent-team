@@ -367,6 +367,21 @@ describe("the per-response output ceiling", () => {
     expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(MAX_OUTPUT_TOKENS);
   });
 
+  it.each([
+    ["zero", 0],
+    ["a negative", -5],
+    ["NaN", Number.NaN],
+  ])("floors %s at one rather than sending it", async (_label, requested) => {
+    // The upper bound was added first and left the guarantee half-shaped: `0` and `NaN` are just
+    // as invalid to the API, and fail with a message about the request rather than the arithmetic.
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ maxTokens: requested }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(1);
+  });
+
   it("leaves a caller's smaller ceiling alone", async () => {
     const messages = fakeMessages(WELL_FORMED);
     const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });

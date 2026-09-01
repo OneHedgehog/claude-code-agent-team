@@ -371,6 +371,13 @@ function isUsablePath(path: string): boolean {
   return !path.split(/[/\\]/).includes("..");
 }
 
+/** Bounds a caller's ceiling into `[1, MAX_OUTPUT_TOKENS]`. `NaN` falls to the floor. */
+export function clampOutputTokens(requested: number): number {
+  if (!Number.isFinite(requested)) return 1;
+
+  return Math.max(1, Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS));
+}
+
 function readUsage(response: unknown): ModelUsage {
   const usage = (response as { usage?: { input_tokens?: unknown; output_tokens?: unknown } })
     ?.usage;
@@ -445,10 +452,12 @@ export class AnthropicModelClient implements ModelClient {
     try {
       raw = await this.#messages.create({
         model: this.#model,
-        // Clamped rather than trusted: a caller that computes this from a budget instead of from
-        // the model's own limit produces a number the API rejects, and the failure arrives as a
-        // vague streaming error rather than as anything naming the real cause.
-        max_tokens: Math.min(request.maxTokens, MAX_OUTPUT_TOKENS),
+        // Clamped rather than trusted, in both directions: a caller that computes this from a
+        // budget instead of from the model's own limit produces a number the API rejects, and the
+        // failure arrives as a vague streaming error rather than as anything naming the real cause.
+        // The floor matters for the same reason -- `0`, a negative, or `NaN` is just as invalid,
+        // and a half-guarantee is one the next caller has to remember the shape of.
+        max_tokens: clampOutputTokens(request.maxTokens),
         thinking: { type: "adaptive" },
         // The guard is a system prompt rather than the first line of the user turn, so that no
         // amount of reviewed content can push it out of position or appear to supersede it.
