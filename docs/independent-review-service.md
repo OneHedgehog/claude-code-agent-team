@@ -237,6 +237,12 @@ record on each poll: whether the listing was a `304`, how many open pull request
 considered, how many it selected, and -- for each one it passed over -- the cheap condition that
 excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
 
+The counts go out on every tick; the per-pull-request list is written only when it differs from the
+tick before. A repository with a steady set of open pull requests would otherwise multiply that set
+into the record stream once a minute forever, and the JSONL cache is disk, which Principle IV meters
+like anything else. The unchanging detail carries nothing the previous tick did not; the counts are
+what prove the loop is alive, so those always go.
+
 It is the only unconditional record the service writes, and it exists because everything else is
 conditional. A tick that selects nothing used to log nothing, so a daemon idling correctly and a
 daemon that had died produced identical output: none. That is not hypothetical -- one ran for

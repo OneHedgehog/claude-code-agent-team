@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -12,8 +14,8 @@ import {
   type ComposeOptions,
 } from "../../src/composition.js";
 import { createTarget } from "../../src/config/target.js";
-import { runDaemon } from "../../src/daemon.js";
-import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
+import { MERGE_GATE_CHECK_NAME, type CheckRunSummary } from "../../src/github/check-run.js";
+import { runDaemon, type OpenPullRequest } from "../../src/daemon.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
@@ -626,8 +628,10 @@ describe("the daemon's heartbeat (Principle VII)", () => {
 
   /** Adapters from the root, with the two reads a tick makes replaced. */
   async function adaptersListing(
-    listing: { pullRequests: { number: number; headSha: string }[] | null; etag: string | null },
-    gateRuns: (ref: string) => unknown[] = () => [],
+    listing: { pullRequests: OpenPullRequest[] | null; etag: string | null },
+    // Typed rather than `unknown[]`: the predicate reads these fields, and a cast here would keep
+    // the file compiling while the stub drifted away from what the daemon actually consumes.
+    gateRuns: (ref: string) => CheckRunSummary[] = () => [],
   ) {
     const base = await composeService({
       ...stubs(emptyCalls(), { logger: sharedLogger }),
@@ -641,7 +645,20 @@ describe("the daemon's heartbeat (Principle VII)", () => {
         ...base.checkRuns,
         listForRef: (params: { ref: string }) => Promise.resolve(gateRuns(params.ref)),
       },
-    } as typeof base;
+    };
+  }
+
+  /** A concluded, passing gate run for `ref`. Complete, so the predicate reads real fields. */
+  function passingGateRun(ref: string): CheckRunSummary {
+    return {
+      id: 1,
+      name: MERGE_GATE_CHECK_NAME,
+      headSha: ref,
+      status: "completed",
+      conclusion: "success",
+      completedAt: "2026-09-01T00:00:00Z",
+      output: { title: "Independent review passed", text: null },
+    };
   }
 
   let records: string[] = [];
@@ -657,6 +674,40 @@ describe("the daemon's heartbeat (Principle VII)", () => {
       .map((line) => JSON.parse(line) as { event: string; tick?: Record<string, unknown> })
       .filter((record) => record.event === "tick.completed");
   }
+
+  it("omits an unchanged skip list on the next tick, and keeps the counts", async () => {
+    capture();
+    // Two ticks over the same steady set. The counts prove the loop is alive on both; repeating
+    // the identical list into the record stream every tick is disk spent on nothing (Principle IV).
+    const adapters = await adaptersListing(
+      { pullRequests: [{ number: 31, headSha: "e".repeat(40) }], etag: 'W/"steady"' },
+      (ref) => [passingGateRun(ref)],
+    );
+
+    let ticks = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        ticks += 1;
+
+        return ticks <= 3;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, second] = heartbeats();
+
+    expect(first?.tick).toEqual({
+      unchanged: false,
+      considered: 1,
+      selected: 0,
+      skipped: [{ pullRequest: 31, reason: "gate-run-did-not-fail" }],
+    });
+    // Same set, so the list is not repeated -- but the heartbeat still fires.
+    expect(second?.tick).toEqual({ unchanged: false, considered: 1, selected: 0 });
+  });
 
   it("records the 304 tick, which is the case that motivates the heartbeat", async () => {
     // The idling daemon answers `304` tick after tick. That path carries the `unchanged` field and
@@ -692,9 +743,7 @@ describe("the daemon's heartbeat (Principle VII)", () => {
         ],
         etag: 'W/"listing"',
       },
-      (ref) => [
-        { name: MERGE_GATE_CHECK_NAME, headSha: ref, status: "completed", conclusion: "success" },
-      ],
+      (ref) => [passingGateRun(ref)],
     );
 
     await runDaemon({
@@ -715,34 +764,39 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     });
   });
 
-  it("emits exactly one tick.completed on a tick that selects nothing", async () => {
-    // The motivating case, and the one every other event misses: an idle tick. Every other record
-    // this service writes is conditional, so before this event a daemon idling correctly and a
-    // daemon that had died wrote byte-identical output -- none.
-    const records: string[] = [];
-    const logger = createLogger({
-      runId: "run-daemon",
-      write: (line) => records.push(line),
-    });
+  it("counts a selection as well as a skip, so `selected` is observed non-zero", async () => {
+    capture();
+    // One pull request with no gate run for its head (selected under clause (a)) and one with a
+    // concluded passing run (skipped). Every other test asserts `selected: 0`, so a heartbeat that
+    // hard-wired that field, or read the wrong collection, would still pass all of them.
+    const selectedSha = "c".repeat(40);
+    const adapters = await adaptersListing(
+      {
+        pullRequests: [
+          { number: 21, headSha: selectedSha },
+          { number: 22, headSha: "d".repeat(40) },
+        ],
+        etag: 'W/"mixed"',
+      },
+      (ref) => (ref === selectedSha ? [] : [passingGateRun(ref)]),
+    );
 
     await runDaemon({
       target: TARGET,
-      compose: () =>
-        composeService({ ...stubs(emptyCalls(), { logger }), graphqlClient: noThreads() }),
+      compose: () => Promise.resolve(adapters),
       running: oneTick(),
       sleep: () => Promise.resolve(),
+      // A selected pull request is actually run, and running one takes a host lease from a
+      // directory shared by every agent on the machine. Redirected so the test neither depends on
+      // that directory nor competes with anything else holding a slot in it.
+      env: { XDG_STATE_HOME: mkdtempSync(join(tmpdir(), "slots-")) },
     });
 
-    const heartbeats = records
-      .map((line) => JSON.parse(line) as { event: string; tick?: unknown })
-      .filter((record) => record.event === "tick.completed");
-
-    expect(heartbeats).toHaveLength(1);
-    expect(heartbeats[0]?.tick).toEqual({
+    expect(heartbeats()[0]?.tick).toEqual({
       unchanged: false,
-      considered: 0,
-      selected: 0,
-      skipped: [],
+      considered: 2,
+      selected: 1,
+      skipped: [{ pullRequest: 22, reason: "gate-run-did-not-fail" }],
     });
   });
 });

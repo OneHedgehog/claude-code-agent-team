@@ -76,7 +76,7 @@
       "description": "The daemon's per-tick heartbeat (Principle VII). Every other event is conditional, so without one unconditional record per tick a correctly idle daemon and a dead one produce identical output: none.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["unchanged", "considered", "selected", "skipped"],
+      "required": ["unchanged", "considered", "selected"],
       "properties": {
         "unchanged": {
           "description": "True when the listing answered 304: nothing changed, and it cost no rate limit (FR-040).",
