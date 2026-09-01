@@ -96,7 +96,8 @@ export interface RecordFields {
     readonly unchanged: boolean;
     readonly considered: number;
     readonly selected: number;
-    readonly skipped: readonly { readonly pullRequest: number; readonly reason: string }[];
+    /** Written only when it differs from the previous tick's; the counts above always are. */
+    readonly skipped?: readonly { readonly pullRequest: number; readonly reason: string }[];
   };
   /**
    * A tool the harness asked to use on the `agent-sdk` transport, and was refused.

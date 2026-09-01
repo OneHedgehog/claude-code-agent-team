@@ -425,6 +425,9 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
    */
   const queuedSince = new Map<string, string>();
 
+  /** The previous tick's skip list, so an unchanged one is not written again. */
+  let lastSkipped: string | null = null;
+
   while (running()) {
     const adapters = await compose();
     const { settings } = adapters.settings;
@@ -463,14 +466,24 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
     //
     // One line per tick, at `info`, costs nothing against FR-040 -- a `304` is free and this is
     // not even a request -- and turns silence back into a signal.
+    // The list is written only when it changes. A repository with a steady set of open pull
+    // requests would otherwise multiply that set into the record stream on every tick, forever,
+    // and the JSONL cache is disk -- a metered resource under Principle IV. The counts still go out
+    // every tick, because their whole purpose is to prove the loop is alive; it is the unchanging
+    // detail behind them that carries no information the previous tick did not.
+    const skipped = tick.considered
+      .filter((selection) => !selection.select)
+      .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }));
+    const signature = JSON.stringify(skipped);
+    const skippedChanged = signature !== lastSkipped;
+    lastSkipped = signature;
+
     adapters.logger.info("tick.completed", {
       tick: {
         unchanged: tick.unchanged,
         considered: tick.considered.length,
         selected: tick.selected.length,
-        skipped: tick.considered
-          .filter((selection) => !selection.select)
-          .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason })),
+        ...(skippedChanged ? { skipped } : {}),
       },
     });
 
