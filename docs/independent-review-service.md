@@ -219,6 +219,14 @@ have accepted. Traversal is refused here even though `config/target.ts` would re
 model output is untrusted data, and a guard that relies on something downstream catching it is one
 refactor away from not being a guard.
 
+A refusal is recorded rather than performed quietly: the adapter reports it and the composition root
+writes a `location.rejected` record carrying the rejected path and the reason it failed. The event
+is declared in `REVIEW_EVENTS`, and the record's `location` object -- `path` and `reason`, both
+required -- is part of `schemas/review-record.schema.json`, which anything consuming the record
+stream validates against. Two of the three rejection causes are ordinary model sloppiness; the third
+is model output naming a path outside the checkout, and a security boundary that refuses something
+without saying so leaves nothing to notice a pattern in (Principle VII).
+
 **The gate never reports `neutral`, `skipped`, or `cancelled`.** GitHub treats the first two as
 non-failing, which is exactly the absent gate that reads as no objection. Every inability to review
 is a `failure` with a reason. A run still waiting reports nothing at all rather than reporting
