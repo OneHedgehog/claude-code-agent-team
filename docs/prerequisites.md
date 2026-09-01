@@ -306,7 +306,7 @@ It must be set through the API, for the reason in [the ordering note](#order-to-
 is passed explicitly because a `PATCH` omitting it would drop the up-to-date-branch requirement:
 
 ```bash
-security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
+security find-generic-password -s github-mcp-pat -w | awk '{print "header = \"Authorization: Bearer " $0 "\""}' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
 ```
 
 Success prints `"checks": [{"context": "independent-review", ...}]`. A `403` is the PAT lacking
@@ -318,7 +318,7 @@ service reports the check green on each head SHA, and `enforce_admins` means you
 as owner. Removing the requirement is the only escape:
 
 ```bash
-security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
+security find-generic-password -s github-mcp-pat -w | awk '{print "header = \"Authorization: Bearer " $0 "\""}' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
 ```
 
 The same command sets the fixture's gate — it is how [§6](#6-fixture-repository)'s 6d was done —
@@ -335,15 +335,17 @@ bypass, which was restored immediately afterwards.
 **The authority for that waiver — what was overridden, by whom, when, why, and what it leaves
 unreviewed — is [specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), and only
 there.** This page is rewritten whenever a prerequisite changes; a spec never is, which is where
-Principle VI's recorded, human-approved reason belongs. Nothing below restates it, so the two
-cannot drift apart.
+Principle VI's recorded, human-approved reason belongs. Nothing below restates the *reasoning* --
+what was overridden, why, and on whose authority all live in the spec. The settings named below are
+repeated on purpose, because checking them is the operational task this page exists for, and a
+verification step that made you open another document to learn what to expect would not be one.
 
 What this page owes you is the operational half — what to check, and how. The protection should
 read back exactly as the spec records it: `enforce_admins.enabled` true,
 `required_status_checks.checks` `["independent-review"]`, and `required_approving_review_count` 1.
 
 ```bash
-security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
+security find-generic-password -s github-mcp-pat -w | awk '{print "header = \"Authorization: Bearer " $0 "\""}' | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
 ```
 
 The token is piped into `curl --config -` rather than interpolated into a variable. Both forms read
