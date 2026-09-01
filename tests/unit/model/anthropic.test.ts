@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   AnthropicModelClient,
+  MAX_OUTPUT_TOKENS,
   MissingCredentialError,
+  parseReviewResponse,
   REVIEW_RESPONSE_SCHEMA,
   oauthProfileDir,
   requireModelCredential,
@@ -43,7 +45,7 @@ const WELL_FORMED = {
             rule: "hardcoded-credential",
             severity: "critical",
             blocking: true,
-            location: { path: "src/cli.ts", line: 3, side: "RIGHT" },
+            location: { pullRequestLevel: false, path: "src/cli.ts", line: 3, side: "RIGHT" },
             description: "A key is committed here.",
           },
         ],
@@ -349,5 +351,167 @@ describe("usage is always reported (FR-031)", () => {
     const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
 
     await expect(client.review(request())).rejects.toThrow(ModelError);
+  });
+});
+
+describe("the per-response output ceiling", () => {
+  it("never asks for more output than the model will produce", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    // The number a budget slice used to supply. The API rejects a non-streaming request this
+    // large, and the rejection names streaming rather than the caller's arithmetic, so the clamp
+    // lives here rather than at every call site.
+    await client.review(request({ maxTokens: 1_250_000 }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(MAX_OUTPUT_TOKENS);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["a negative", -5],
+    ["NaN", Number.NaN],
+  ])("floors %s at one rather than sending it", async (_label, requested) => {
+    // The upper bound was added first and left the guarantee half-shaped: `0` and `NaN` are just
+    // as invalid to the API, and fail with a message about the request rather than the arithmetic.
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ maxTokens: requested }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(1);
+  });
+
+  it("leaves a caller's smaller ceiling alone", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ maxTokens: 4000 }));
+
+    expect((messages.sent[0] as { max_tokens: number }).max_tokens).toBe(4000);
+  });
+});
+
+describe("the flat wire location (structured outputs rejects `oneOf`)", () => {
+  const withLocation = (location: unknown) => ({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          findings: [
+            {
+              rule: "r",
+              severity: "high",
+              blocking: true,
+              location,
+              description: "d",
+            },
+          ],
+          verdict: "request-changes",
+          replyJudgements: [],
+        }),
+      },
+    ],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+
+  it("restores a diff location as the union the rest of the service expects", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: false, path: "src/a.ts", line: 7, side: "LEFT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings[0]?.location).toEqual({ path: "src/a.ts", line: 7, side: "LEFT" });
+  });
+
+  it("drops the ignored fields when the finding is pull-request level", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: true, path: "src/a.ts", line: 7, side: "LEFT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("falls back to pull-request level rather than losing a finding it cannot place", async () => {
+    const messages = fakeMessages(
+      withLocation({ pullRequestLevel: false, path: "", line: 0, side: "RIGHT" }),
+    );
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const { findings } = await client.review(request());
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("sends a schema with no `oneOf` anywhere in it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request());
+
+    expect(JSON.stringify(messages.sent[0])).not.toContain("oneOf");
+  });
+});
+
+describe("the location guard is tested on the ground it actually covers", () => {
+  function parsed(path: string, onReject?: (r: { path: string; reason: string }) => void) {
+    return parseReviewResponse(
+      {
+        verdict: "request-changes",
+        findings: [
+          {
+            rule: "r",
+            severity: "high",
+            blocking: true,
+            location: { pullRequestLevel: false, path, line: 1, side: "RIGHT" },
+            description: "d",
+          },
+        ],
+        replyJudgements: [],
+      },
+      undefined,
+      onReject,
+    );
+  }
+
+  // Each of these walked past the guard while `/etc/passwd` was refused, because the `..` check
+  // split on both separators and the rooted check looked only for a leading `/`.
+  it.each([
+    ["a backslash-rooted path", "\\etc\\passwd"],
+    ["a UNC share", "\\\\server\\share\\x"],
+    ["a drive letter", "C:/etc/passwd"],
+    ["backslash traversal", "..\\..\\etc\\passwd"],
+  ])("refuses %s", (_label, path) => {
+    expect(parsed(path).findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("uses the trimmed path it validated, not the one the model sent", () => {
+    const location = parsed("  src/a.ts  ").findings[0]?.location;
+
+    // Deleting the trim leaves the untrimmed string here, which GitHub will not match to a file.
+    expect(location).toEqual({ path: "src/a.ts", line: 1, side: "RIGHT" });
+  });
+
+  it("records a refusal rather than downgrading silently (Principle VII)", () => {
+    const rejections: { path: string; reason: string }[] = [];
+
+    parsed("../../etc/passwd", (r) => rejections.push(r));
+
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]?.path).toBe("../../etc/passwd");
+  });
+
+  it("says nothing when the location is usable", () => {
+    const rejections: { path: string; reason: string }[] = [];
+
+    parsed("src/a.ts", (r) => rejections.push(r));
+
+    expect(rejections).toEqual([]);
   });
 });

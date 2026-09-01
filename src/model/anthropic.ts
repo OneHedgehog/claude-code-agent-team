@@ -7,6 +7,8 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 
 import {
   ModelError,
+  type FindingDraft,
+  type FindingLocation,
   type ModelClient,
   type ModelUsage,
   type ReviewRequest,
@@ -25,6 +27,21 @@ import {
  */
 
 export const REVIEW_MODEL = "claude-opus-5";
+
+/**
+ * The per-response output ceiling (`max_tokens`).
+ *
+ * This is a *response* cap, not a budget. The distinction is load-bearing and was got wrong once:
+ * a slice of `reviewerTokenReserve` -- a spend allowance for the whole run -- was passed here
+ * directly, asking for 1,250,000 output tokens. The model tops out at 128,000, and the SDK refuses
+ * a non-streaming request that large outright, so both roles failed with "Streaming is required for
+ * operations that may take longer than 10 minutes" before a single token was spent.
+ *
+ * 16,000 is the documented non-streaming ceiling that stays inside the SDK's HTTP timeout. A review
+ * returns structured findings against a diff bounded by `maxReviewableDiffSize`, so it has no reason
+ * to approach it; going higher would mean streaming, which buys nothing here.
+ */
+export const MAX_OUTPUT_TOKENS = 16_000;
 
 export class MissingCredentialError extends Error {
   override readonly name = "MissingCredentialError";
@@ -148,25 +165,21 @@ export const REVIEW_RESPONSE_SCHEMA = {
           rule: { type: "string", minLength: 1 },
           severity: { enum: ["critical", "high", "medium", "low"] },
           blocking: { type: "boolean" },
+          // Flat rather than a `oneOf` of two shapes, because structured outputs rejects `oneOf`
+          // outright: "Schema type 'oneOf' is not supported". The union survives where it matters
+          // -- `FindingLocation` is still a discriminated union everywhere downstream -- and
+          // `normalizeLocation` restores it at this boundary. When `pullRequestLevel` is true the
+          // other three fields are ignored, which is why they carry no constraints here.
           location: {
-            oneOf: [
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["path", "line", "side"],
-                properties: {
-                  path: { type: "string", minLength: 1 },
-                  line: { type: "integer", minimum: 1 },
-                  side: { enum: ["LEFT", "RIGHT"] },
-                },
-              },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["pullRequestLevel"],
-                properties: { pullRequestLevel: { const: true } },
-              },
-            ],
+            type: "object",
+            additionalProperties: false,
+            required: ["pullRequestLevel", "path", "line", "side"],
+            properties: {
+              pullRequestLevel: { type: "boolean" },
+              path: { type: "string" },
+              line: { type: "integer" },
+              side: { enum: ["LEFT", "RIGHT"] },
+            },
           },
           description: { type: "string", minLength: 1 },
         },
@@ -255,6 +268,7 @@ export function buildReviewPrompt(request: ReviewRequest): ReviewPrompt {
 export function parseReviewResponse(
   parsed: unknown,
   usage: ModelUsage = NO_USAGE,
+  onRejectedLocation?: RejectedLocation,
 ): Omit<ReviewResponse, "usage"> {
   if (!validateResponse(parsed)) {
     throw new ModelError(
@@ -263,13 +277,105 @@ export function parseReviewResponse(
     );
   }
 
-  const response = parsed as Omit<ReviewResponse, "usage">;
+  const response = parsed as WireResponse;
 
   return {
-    findings: response.findings,
+    findings: response.findings.map((finding) => ({
+      rule: finding.rule,
+      severity: finding.severity,
+      blocking: finding.blocking,
+      location: normalizeLocation(finding.location, onRejectedLocation),
+      description: finding.description,
+    })),
     verdict: response.verdict,
     replyJudgements: response.replyJudgements,
   };
+}
+
+/**
+ * Told when a location the model produced was refused and downgraded to pull-request level. The
+ * adapter has no logger of its own -- it is constructed with a credential and a transport, not with
+ * observability -- so the composition root supplies this and records it (Principle VII).
+ */
+export type RejectedLocation = (rejection: { path: string; reason: string }) => void;
+
+/** The flat `location` the wire schema carries, before it becomes a `FindingLocation`. */
+interface WireLocation {
+  readonly pullRequestLevel: boolean;
+  readonly path: string;
+  readonly line: number;
+  readonly side: "LEFT" | "RIGHT";
+}
+
+type WireResponse = Omit<Omit<ReviewResponse, "usage">, "findings"> & {
+  readonly findings: readonly (Omit<FindingDraft, "location"> & {
+    readonly location: WireLocation;
+  })[];
+};
+
+/**
+ * Restores the discriminated union the flat wire shape flattened.
+ *
+ * A location that claims to be in the diff but names no file, or a line before the first, becomes
+ * pull-request level rather than an error. That is the same fallback `locations.ts` already applies
+ * to a location it cannot address: a finding the model could not place is still a finding, and
+ * discarding it because its coordinates are unusable would lose the very thing it was asked for
+ * (FR-014).
+ */
+function normalizeLocation(location: WireLocation, onReject?: RejectedLocation): FindingLocation {
+  if (location.pullRequestLevel) return { pullRequestLevel: true };
+
+  // Trimmed once, then both checked and used in that form. Validating one string and using another
+  // is how a guard comes to pass something it never approved.
+  const path = location.path.trim();
+
+  if (!isUsablePath(path)) {
+    // Recorded rather than silently rewritten (Principle VII). An empty or malformed path is
+    // ordinary model sloppiness, but a rooted or `..`-bearing one is model output attempting to
+    // leave the checkout, and a security boundary that refuses something without saying so leaves
+    // nothing to notice a pattern in.
+    onReject?.({ path, reason: "path is empty, rooted, or contains a `..` segment" });
+
+    return { pullRequestLevel: true };
+  }
+
+  if (location.line < 1) {
+    onReject?.({ path, reason: `line ${String(location.line)} is before the first` });
+
+    return { pullRequestLevel: true };
+  }
+
+  return { path, line: location.line, side: location.side };
+}
+
+/**
+ * Whether a path the model produced may be used to anchor a comment.
+ *
+ * The flat schema cannot carry `minLength` on a field that a pull-request-level finding leaves
+ * empty, so the constraint the `oneOf` used to enforce is enforced here instead -- at the same
+ * boundary, in code rather than in JSON Schema.
+ *
+ * Traversal is rejected here even though `locations.ts` would refuse to address it anyway. Model
+ * output is untrusted data (Principle V), and a boundary that passes `../../etc/passwd` through on
+ * the grounds that something downstream will catch it is one refactor away from being wrong.
+ */
+function isUsablePath(path: string): boolean {
+  if (path === "") return false;
+
+  // Both separators, in both checks. Splitting on `/` and `\\` for `..` while rejecting only a
+  // leading `/` left the two neighbouring guards covering different ground: `\\etc\\passwd` and
+  // `C:/etc/passwd` walked past a guard that stopped `/etc/passwd`.
+  if (/^[/\\]/.test(path)) return false;
+  if (/^[A-Za-z]:/.test(path)) return false;
+
+  return !path.split(/[/\\]/).includes("..");
+}
+
+/** Bounds a caller's ceiling into `[1, MAX_OUTPUT_TOKENS]`. `NaN` falls to the floor. */
+export function clampOutputTokens(requested: number): number {
+  if (!Number.isFinite(requested)) return 1;
+
+  return Math.max(1, Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS));
 }
 
 function readUsage(response: unknown): ModelUsage {
@@ -308,11 +414,14 @@ export interface AnthropicOptions {
   readonly credential: ModelCredential;
   readonly messages: MessagesApi;
   readonly model?: string;
+  /** Optional: called when a finding's location was refused. See `RejectedLocation`. */
+  readonly onRejectedLocation?: RejectedLocation;
 }
 
 export class AnthropicModelClient implements ModelClient {
   readonly #messages: MessagesApi;
   readonly #model: string;
+  readonly #onRejectedLocation: RejectedLocation | undefined;
 
   /**
    * The credential is accepted so construction fails loudly on a malformed one, but it is never
@@ -333,6 +442,7 @@ export class AnthropicModelClient implements ModelClient {
 
     this.#messages = options.messages;
     this.#model = options.model ?? REVIEW_MODEL;
+    this.#onRejectedLocation = options.onRejectedLocation;
   }
 
   async review(request: ReviewRequest): Promise<ReviewResponse> {
@@ -342,7 +452,12 @@ export class AnthropicModelClient implements ModelClient {
     try {
       raw = await this.#messages.create({
         model: this.#model,
-        max_tokens: request.maxTokens,
+        // Clamped rather than trusted, in both directions: a caller that computes this from a
+        // budget instead of from the model's own limit produces a number the API rejects, and the
+        // failure arrives as a vague streaming error rather than as anything naming the real cause.
+        // The floor matters for the same reason -- `0`, a negative, or `NaN` is just as invalid,
+        // and a half-guarantee is one the next caller has to remember the shape of.
+        max_tokens: clampOutputTokens(request.maxTokens),
         thinking: { type: "adaptive" },
         // The guard is a system prompt rather than the first line of the user turn, so that no
         // amount of reviewed content can push it out of position or appear to supersede it.
@@ -378,6 +493,6 @@ export class AnthropicModelClient implements ModelClient {
       throw new ModelError("model response was not JSON; prose is never parsed", usage);
     }
 
-    return { ...parseReviewResponse(parsed, usage), usage };
+    return { ...parseReviewResponse(parsed, usage, this.#onRejectedLocation), usage };
   }
 }

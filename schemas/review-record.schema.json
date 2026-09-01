@@ -45,6 +45,7 @@
         "role.verdict_missing",
         "finding.posted",
         "finding.resolved",
+        "location.rejected",
         "finding.waiver_requested",
         "roles.contradiction_recorded",
         "roles.disagreement_escalated",
@@ -111,6 +112,16 @@
       "description": "Optional settings and the values actually applied, whether supplied or filled from the documented default, so that no behavior depends on a value nobody can see (FR-054).",
       "type": "object",
       "additionalProperties": true
+    },
+    "location": {
+      "description": "A location the model produced that was refused and downgraded to pull-request level (Principle VII).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "reason"],
+      "properties": {
+        "path": { "type": "string" },
+        "reason": { "type": "string" }
+      }
     },
     "finding": {
       "type": "object",

@@ -188,6 +188,45 @@ with every run.
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
+**A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
+may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
+inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because
+the failure otherwise arrives as a vague streaming error rather than as anything naming the
+arithmetic. Deriving that ceiling from the token budget instead asked for 1.25M output tokens and the
+SDK refused every call before sending it. The budget's side of the relationship is the paragraph
+below: the reservation includes this cap, so a response can never emit more than was authorised.
+
+**The budget reserves what a review costs, not a slice of the reserve.** Before a role runs, the
+ledger is asked to authorise an estimate: the prompt -- dominated by the diff, which is already in
+hand -- plus everything the response may emit. It replaced a per-role slice of
+`reviewerTokenReserve`, which reserved over a million tokens for a review that spends tens of
+thousands and could therefore refuse a run for failing to reserve capacity it was never going to
+use. The estimate is approximate by design (four characters to a token, with a generous prompt
+overhead): it exists to stop a run that cannot afford itself, and reserving slightly too much fails
+safe where reserving too little does not.
+
+**A finding's location arrives flat and becomes a union at the boundary.** Structured outputs rejects
+`oneOf` -- "Schema type 'oneOf' is not supported" -- so the wire schema carries one object with a
+`pullRequestLevel` discriminant and three fields that are ignored when it is set. `normalizeLocation`
+restores the discriminated union, and everything downstream still sees `FindingLocation`.
+
+That conversion is also where a location is *validated*, since a flat schema cannot require a
+non-empty path on a field that pull-request-level findings leave blank. A location claiming a place
+in the diff is downgraded to pull-request level when its path is empty, absolute, or contains a `..`
+segment, or when its line is before the first. The finding survives either way -- a finding that
+cannot be placed is still a finding (FR-014) -- but it never carries a path the service would not
+have accepted. Traversal is refused here even though `config/target.ts` would refuse it later:
+model output is untrusted data, and a guard that relies on something downstream catching it is one
+refactor away from not being a guard.
+
+A refusal is recorded rather than performed quietly: the adapter reports it and the composition root
+writes a `location.rejected` record carrying the rejected path and the reason it failed. The event
+is declared in `REVIEW_EVENTS`, and the record's `location` object -- `path` and `reason`, both
+required -- is part of `schemas/review-record.schema.json`, which anything consuming the record
+stream validates against. Two of the three rejection causes are ordinary model sloppiness; the third
+is model output naming a path outside the checkout, and a security boundary that refuses something
+without saying so leaves nothing to notice a pattern in (Principle VII).
+
 **The gate never reports `neutral`, `skipped`, or `cancelled`.** GitHub treats the first two as
 non-failing, which is exactly the absent gate that reads as no objection. Every inability to review
 is a `failure` with a reason. A run still waiting reports nothing at all rather than reporting

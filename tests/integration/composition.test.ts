@@ -6,6 +6,7 @@ import { parseArgs } from "../../src/cli.js";
 
 import {
   composeService,
+  estimateReviewTokens,
   ledgerPath,
   reviewPullRequest,
   type ComposeOptions,
@@ -14,6 +15,7 @@ import { createTarget } from "../../src/config/target.js";
 import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
+import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
 
@@ -309,6 +311,46 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
     expect(calls.reviewsSubmitted).toContain("REQUEST_CHANGES");
   });
 
+  it("reserves what a review actually consumes, not a slice of an unrelated number", () => {
+    // The regression this replaces: the reservation was `reviewerTokenReserve / 4` -- 1,250,000 per
+    // role for a review that spends tens of thousands -- so a run could be refused for failing to
+    // reserve millions it was never going to use. The estimate is now the prompt plus the response
+    // ceiling, and the prompt is dominated by the diff, which is already in hand.
+    const small = estimateReviewTokens(0, MAX_OUTPUT_TOKENS);
+    const large = estimateReviewTokens(400_000, MAX_OUTPUT_TOKENS);
+
+    expect(large).toBeGreaterThan(small);
+    // Whatever else it is, it always covers everything the response may emit (Principle IV).
+    expect(small).toBeGreaterThanOrEqual(MAX_OUTPUT_TOKENS);
+    // And it stays in the range a review actually costs rather than the millions it replaced.
+    expect(small).toBeLessThan(1_000_000);
+  });
+
+  it("asks the model for the model's ceiling, which no budget arithmetic derives", async () => {
+    let seen = -1;
+    const model: ModelClient = {
+      review: (request) => {
+        seen = request.maxTokens;
+
+        return Promise.resolve({
+          verdict: "approve",
+          findings: [],
+          replyJudgements: [],
+          usage: { inputTokens: 10, outputTokens: 10 },
+        });
+      },
+    };
+
+    const adapters = await composeService({
+      ...stubs(emptyCalls(), { model }),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-composition" });
+
+    expect(seen).toBe(MAX_OUTPUT_TOKENS);
+  });
+
   it("spends against the ledger, so a run's cost is recorded rather than merely incurred", async () => {
     const adapters = await composeService({ ...stubs(emptyCalls()), graphqlClient: noThreads() });
 
@@ -485,5 +527,86 @@ describe("settings the root loads are the settings the schema publishes", () => 
     expect(loaded.settings.maxConcurrentReviews).toBeLessThanOrEqual(
       loaded.host.maxConcurrentAgents,
     );
+  });
+});
+
+describe("what the root wires to the real adapter (Principle II)", () => {
+  /** A transport that answers with one finding whose location tries to leave the checkout. */
+  function messagesReturning(path: string) {
+    return {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async create(): Promise<unknown> {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                findings: [
+                  {
+                    rule: "r",
+                    severity: "low",
+                    blocking: false,
+                    location: { pullRequestLevel: false, path, line: 1, side: "RIGHT" },
+                    description: "d",
+                  },
+                ],
+                verdict: "approve",
+                replyJudgements: [],
+              }),
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 10 },
+        };
+      },
+    };
+  }
+
+  it("records location.rejected when the real adapter refuses a path", async () => {
+    // Substituting `model` would test neither the adapter nor this wiring. Deleting the
+    // `onRejectedLocation` argument in the root must fail a test, and this is that test.
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-wiring", write: (line) => records.push(line) });
+
+    const { model: _unused, ...withoutModel } = stubs(emptyCalls(), { logger });
+    const adapters = await composeService({
+      ...withoutModel,
+      messages: messagesReturning("../../etc/passwd"),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-wiring" });
+
+    const rejected = records
+      .map((line) => JSON.parse(line) as { event: string; location?: unknown })
+      .filter((record) => record.event === "location.rejected");
+
+    // One per role: both reviewers call the model, and both are handed the same bad location.
+    expect(rejected).toHaveLength(2);
+    for (const record of rejected) {
+      expect(record.location).toEqual({
+        path: "../../etc/passwd",
+        reason: "path is empty, rooted, or contains a `..` segment",
+      });
+    }
+  });
+
+  it("says nothing when the adapter accepts the path", async () => {
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-wiring", write: (line) => records.push(line) });
+
+    const { model: _unused, ...withoutModel } = stubs(emptyCalls(), { logger });
+    const adapters = await composeService({
+      ...withoutModel,
+      messages: messagesReturning("src/cli.ts"),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-wiring" });
+
+    expect(
+      records
+        .map((line) => JSON.parse(line) as { event: string })
+        .filter((r) => r.event === "location.rejected"),
+    ).toEqual([]);
   });
 });
