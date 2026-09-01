@@ -5,15 +5,30 @@
   "description": "One JSON-lines record emitted by the review service (FR-033). Every record carries the run identifier that ties it to one review of one pull request revision. Together with the pull request itself, these records make a review reconstructible without re-running it (FR-034).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["runId", "timestamp", "level", "event"],
+  "required": [
+    "runId",
+    "timestamp",
+    "level",
+    "event"
+  ],
   "properties": {
     "runId": {
       "description": "Identifies one review of one pull request revision.",
       "type": "string",
       "minLength": 1
     },
-    "timestamp": { "type": "string", "format": "date-time" },
-    "level": { "enum": ["debug", "info", "warn", "error"] },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "level": {
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ]
+    },
     "event": {
       "description": "What happened. State transitions carry the machine's state names so the run is replayable from records alone.",
       "enum": [
@@ -45,6 +60,7 @@
         "role.verdict_missing",
         "finding.posted",
         "finding.resolved",
+        "location.rejected",
         "finding.waiver_requested",
         "roles.contradiction_recorded",
         "roles.disagreement_escalated",
@@ -58,23 +74,42 @@
       "type": "string",
       "pattern": "^[^/]+/[^/]+$"
     },
-    "pullRequest": { "type": "integer", "minimum": 1 },
+    "pullRequest": {
+      "type": "integer",
+      "minimum": 1
+    },
     "revision": {
       "description": "Head SHA the run examined. Every verdict and finding is bound to it (FR-009).",
       "type": "string"
     },
-    "round": { "type": "integer", "minimum": 1 },
+    "round": {
+      "type": "integer",
+      "minimum": 1
+    },
     "state": {
       "description": "Statechart state, present on state.entered records.",
       "type": "string"
     },
-    "role": { "enum": ["security", "implementation"] },
-    "verdict": { "enum": ["approve", "request-changes"] },
+    "role": {
+      "enum": [
+        "security",
+        "implementation"
+      ]
+    },
+    "verdict": {
+      "enum": [
+        "approve",
+        "request-changes"
+      ]
+    },
     "prerequisites": {
       "description": "Startup verification of the service's own preconditions (FR-051). Emitted before any model tokens are spent; a missing prerequisite fails the gate naming it and escalates.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["permissionsHeld", "gateRequiredByBranchProtection"],
+      "required": [
+        "permissionsHeld",
+        "gateRequiredByBranchProtection"
+      ],
       "properties": {
         "permissionsHeld": {
           "description": "True when the installation holds every permission the work requires (FR-003).",
@@ -84,11 +119,16 @@
           "description": "True when the check run's name appears in the base branch's required status checks (FR-025).",
           "type": "boolean"
         },
-        "baseBranch": { "type": "string" },
+        "baseBranch": {
+          "type": "string"
+        },
         "missing": {
           "description": "What was absent, named so a human can act on it (FR-024).",
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -96,14 +136,30 @@
       "description": "Paths excluded from line-anchored findings and from the changed-line count: git-reported binary plus declared excludedPathPatterns, never inferred (FR-053). The count is additionally reported in the check-run output.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["count", "paths"],
+      "required": [
+        "count",
+        "paths"
+      ],
       "properties": {
-        "count": { "type": "integer", "minimum": 0 },
-        "paths": { "type": "array", "items": { "type": "string" } },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "source": {
           "description": "Per-path attribution, so an exclusion can always be traced to a declaration rather than a guess.",
           "type": "array",
-          "items": { "enum": ["vcs-binary", "declared-pattern"] }
+          "items": {
+            "enum": [
+              "vcs-binary",
+              "declared-pattern"
+            ]
+          }
         }
       }
     },
@@ -115,13 +171,33 @@
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "severity", "blocking"],
+      "required": [
+        "id",
+        "severity",
+        "blocking"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "severity": { "enum": ["critical", "high", "medium", "low"] },
-        "blocking": { "type": "boolean" },
-        "path": { "type": "string" },
-        "line": { "type": "integer", "minimum": 1 },
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
         "pullRequestLevel": {
           "description": "True when the location was not addressable within the diff (FR-014).",
           "type": "boolean"
@@ -131,32 +207,58 @@
     "gate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["conclusion"],
+      "required": [
+        "conclusion"
+      ],
       "properties": {
         "conclusion": {
           "description": "Never neutral, skipped, or cancelled (FR-023).",
-          "enum": ["success", "failure", "unreported"]
+          "enum": [
+            "success",
+            "failure",
+            "unreported"
+          ]
         },
-        "reason": { "type": "string" }
+        "reason": {
+          "type": "string"
+        }
       }
     },
     "usage": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "tokensConsumed": { "type": "integer", "minimum": 0 },
-        "budgetRemaining": { "type": "integer" },
-        "platformRequestsUsed": { "type": "integer", "minimum": 0 },
-        "platformRequestsRemaining": { "type": "integer" }
+        "tokensConsumed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgetRemaining": {
+          "type": "integer"
+        },
+        "platformRequestsUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "platformRequestsRemaining": {
+          "type": "integer"
+        }
       }
     },
     "escalation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reason", "channelDelivered", "statedOnPullRequest"],
+      "required": [
+        "reason",
+        "channelDelivered",
+        "statedOnPullRequest"
+      ],
       "properties": {
-        "reason": { "type": "string" },
-        "channelDelivered": { "type": "boolean" },
+        "reason": {
+          "type": "string"
+        },
+        "channelDelivered": {
+          "type": "boolean"
+        },
         "statedOnPullRequest": {
           "description": "Both must be true; the pull request statement never substitutes for the channel (FR-035).",
           "type": "boolean"
@@ -167,8 +269,29 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "kind": { "type": "string" },
-        "message": { "type": "string" }
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "location": {
+      "description": "A location the model produced that was refused and downgraded to pull-request level (Principle VII).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
       }
     }
   }

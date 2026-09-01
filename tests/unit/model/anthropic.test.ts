@@ -4,6 +4,7 @@ import {
   AnthropicModelClient,
   MAX_OUTPUT_TOKENS,
   MissingCredentialError,
+  parseReviewResponse,
   REVIEW_RESPONSE_SCHEMA,
   oauthProfileDir,
   requireModelCredential,
@@ -440,5 +441,62 @@ describe("the flat wire location (structured outputs rejects `oneOf`)", () => {
     await client.review(request());
 
     expect(JSON.stringify(messages.sent[0])).not.toContain("oneOf");
+  });
+});
+
+describe("the location guard is tested on the ground it actually covers", () => {
+  function parsed(path: string, onReject?: (r: { path: string; reason: string }) => void) {
+    return parseReviewResponse(
+      {
+        verdict: "request-changes",
+        findings: [
+          {
+            rule: "r",
+            severity: "high",
+            blocking: true,
+            location: { pullRequestLevel: false, path, line: 1, side: "RIGHT" },
+            description: "d",
+          },
+        ],
+        replyJudgements: [],
+      },
+      undefined,
+      onReject,
+    );
+  }
+
+  // Each of these walked past the guard while `/etc/passwd` was refused, because the `..` check
+  // split on both separators and the rooted check looked only for a leading `/`.
+  it.each([
+    ["a backslash-rooted path", "\\etc\\passwd"],
+    ["a UNC share", "\\\\server\\share\\x"],
+    ["a drive letter", "C:/etc/passwd"],
+    ["backslash traversal", "..\\..\\etc\\passwd"],
+  ])("refuses %s", (_label, path) => {
+    expect(parsed(path).findings[0]?.location).toEqual({ pullRequestLevel: true });
+  });
+
+  it("uses the trimmed path it validated, not the one the model sent", () => {
+    const location = parsed("  src/a.ts  ").findings[0]?.location;
+
+    // Deleting the trim leaves the untrimmed string here, which GitHub will not match to a file.
+    expect(location).toEqual({ path: "src/a.ts", line: 1, side: "RIGHT" });
+  });
+
+  it("records a refusal rather than downgrading silently (Principle VII)", () => {
+    const rejections: { path: string; reason: string }[] = [];
+
+    parsed("../../etc/passwd", (r) => rejections.push(r));
+
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]?.path).toBe("../../etc/passwd");
+  });
+
+  it("says nothing when the location is usable", () => {
+    const rejections: { path: string; reason: string }[] = [];
+
+    parsed("src/a.ts", (r) => rejections.push(r));
+
+    expect(rejections).toEqual([]);
   });
 });

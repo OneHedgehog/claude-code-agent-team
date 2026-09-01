@@ -37,6 +37,7 @@ export const REVIEW_EVENTS = [
   "role.verdict_missing",
   "finding.posted",
   "finding.resolved",
+  "location.rejected",
   "finding.waiver_requested",
   "roles.contradiction_recorded",
   "roles.disagreement_escalated",
@@ -70,6 +71,15 @@ export interface RecordFields {
     readonly source?: readonly ("vcs-binary" | "declared-pattern")[];
   };
   readonly effectiveOptionalSettings?: Readonly<Record<string, unknown>>;
+  /**
+   * A location the model produced that was refused and downgraded to pull-request level. One of
+   * its causes is model output naming a path outside the checkout, which is a security boundary
+   * and must leave a record (Principle VII).
+   */
+  readonly location?: {
+    readonly path: string;
+    readonly reason: string;
+  };
   readonly finding?: {
     readonly id: string;
     readonly severity: "critical" | "high" | "medium" | "low";

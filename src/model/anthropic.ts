@@ -268,6 +268,7 @@ export function buildReviewPrompt(request: ReviewRequest): ReviewPrompt {
 export function parseReviewResponse(
   parsed: unknown,
   usage: ModelUsage = NO_USAGE,
+  onRejectedLocation?: RejectedLocation,
 ): Omit<ReviewResponse, "usage"> {
   if (!validateResponse(parsed)) {
     throw new ModelError(
@@ -283,13 +284,20 @@ export function parseReviewResponse(
       rule: finding.rule,
       severity: finding.severity,
       blocking: finding.blocking,
-      location: normalizeLocation(finding.location),
+      location: normalizeLocation(finding.location, onRejectedLocation),
       description: finding.description,
     })),
     verdict: response.verdict,
     replyJudgements: response.replyJudgements,
   };
 }
+
+/**
+ * Told when a location the model produced was refused and downgraded to pull-request level. The
+ * adapter has no logger of its own -- it is constructed with a credential and a transport, not with
+ * observability -- so the composition root supplies this and records it (Principle VII).
+ */
+export type RejectedLocation = (rejection: { path: string; reason: string }) => void;
 
 /** The flat `location` the wire schema carries, before it becomes a `FindingLocation`. */
 interface WireLocation {
@@ -314,14 +322,28 @@ type WireResponse = Omit<Omit<ReviewResponse, "usage">, "findings"> & {
  * discarding it because its coordinates are unusable would lose the very thing it was asked for
  * (FR-014).
  */
-function normalizeLocation(location: WireLocation): FindingLocation {
+function normalizeLocation(location: WireLocation, onReject?: RejectedLocation): FindingLocation {
   if (location.pullRequestLevel) return { pullRequestLevel: true };
 
   // Trimmed once, then both checked and used in that form. Validating one string and using another
   // is how a guard comes to pass something it never approved.
   const path = location.path.trim();
 
-  if (!isUsablePath(path) || location.line < 1) return { pullRequestLevel: true };
+  if (!isUsablePath(path)) {
+    // Recorded rather than silently rewritten (Principle VII). An empty or malformed path is
+    // ordinary model sloppiness, but a rooted or `..`-bearing one is model output attempting to
+    // leave the checkout, and a security boundary that refuses something without saying so leaves
+    // nothing to notice a pattern in.
+    onReject?.({ path, reason: "path is empty, rooted, or contains a `..` segment" });
+
+    return { pullRequestLevel: true };
+  }
+
+  if (location.line < 1) {
+    onReject?.({ path, reason: `line ${String(location.line)} is before the first` });
+
+    return { pullRequestLevel: true };
+  }
 
   return { path, line: location.line, side: location.side };
 }
@@ -339,10 +361,13 @@ function normalizeLocation(location: WireLocation): FindingLocation {
  */
 function isUsablePath(path: string): boolean {
   if (path === "") return false;
-  if (path.startsWith("/")) return false;
 
-  // Split on both separators: a Windows-style `..\\..` is the same escape wearing a different
-  // delimiter, and a path that only ever anchors a comment is not worth being clever about.
+  // Both separators, in both checks. Splitting on `/` and `\\` for `..` while rejecting only a
+  // leading `/` left the two neighbouring guards covering different ground: `\\etc\\passwd` and
+  // `C:/etc/passwd` walked past a guard that stopped `/etc/passwd`.
+  if (/^[/\\]/.test(path)) return false;
+  if (/^[A-Za-z]:/.test(path)) return false;
+
   return !path.split(/[/\\]/).includes("..");
 }
 
@@ -382,11 +407,14 @@ export interface AnthropicOptions {
   readonly credential: ModelCredential;
   readonly messages: MessagesApi;
   readonly model?: string;
+  /** Optional: called when a finding's location was refused. See `RejectedLocation`. */
+  readonly onRejectedLocation?: RejectedLocation;
 }
 
 export class AnthropicModelClient implements ModelClient {
   readonly #messages: MessagesApi;
   readonly #model: string;
+  readonly #onRejectedLocation: RejectedLocation | undefined;
 
   /**
    * The credential is accepted so construction fails loudly on a malformed one, but it is never
@@ -407,6 +435,7 @@ export class AnthropicModelClient implements ModelClient {
 
     this.#messages = options.messages;
     this.#model = options.model ?? REVIEW_MODEL;
+    this.#onRejectedLocation = options.onRejectedLocation;
   }
 
   async review(request: ReviewRequest): Promise<ReviewResponse> {
@@ -455,6 +484,6 @@ export class AnthropicModelClient implements ModelClient {
       throw new ModelError("model response was not JSON; prose is never parsed", usage);
     }
 
-    return { ...parseReviewResponse(parsed, usage), usage };
+    return { ...parseReviewResponse(parsed, usage, this.#onRejectedLocation), usage };
   }
 }

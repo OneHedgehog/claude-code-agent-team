@@ -586,6 +586,12 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
           // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
           messages: anthropicMessages(modelCredential),
+          // A refused location is a fact about model output, and one of its causes is an attempt
+          // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
+          onRejectedLocation: (rejection) =>
+            logger.warn("location.rejected", {
+              location: { path: rejection.path, reason: rejection.reason },
+            }),
         }));
 
   const ledger =
