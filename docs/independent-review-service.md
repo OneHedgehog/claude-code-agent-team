@@ -188,15 +188,13 @@ with every run.
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
-**A response is capped by the lower of the model's ceiling and the budget reserved for it.** A single
-response may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that
-stays inside the SDK's HTTP timeout -- and never more than the per-role reservation drawn from
-`reviewerTokenReserve`. The two bounds answer different questions and both have been got wrong once:
-passing the reservation straight through asked for 1.25M output tokens and the SDK refused the call
-outright, while using the model's ceiling alone let a response emit more than the ledger had
-authorised whenever `reviewerTokenReserve` was under 64,000. A caller asking for more than either is
-clamped rather than trusted, because the failure otherwise arrives as a vague streaming error rather
-than as anything naming the arithmetic.
+**A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
+may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
+inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because
+the failure otherwise arrives as a vague streaming error rather than as anything naming the
+arithmetic. Deriving that ceiling from the token budget instead asked for 1.25M output tokens and the
+SDK refused every call before sending it. The budget's side of the relationship is the paragraph
+below: the reservation includes this cap, so a response can never emit more than was authorised.
 
 **The budget reserves what a review costs, not a slice of the reserve.** Before a role runs, the
 ledger is asked to authorise an estimate: the prompt -- dominated by the diff, which is already in
