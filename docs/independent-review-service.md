@@ -232,12 +232,14 @@ non-failing, which is exactly the absent gate that reads as no objection. Every 
 is a `failure` with a reason. A run still waiting reports nothing at all rather than reporting
 something reassuring.
 
-**Every tick writes one record, whether or not it found work.** The daemon emits a `tick.completed`
+**Every tick that completes writes one record, whether or not it found work.** The daemon emits a `tick.completed`
 record on each poll: whether the listing was a `304`, how many open pull requests the predicate
 considered, how many it selected, and -- for each one it passed over -- the cheap condition that
 excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
 
-The counts go out on every tick; the per-pull-request list is written only when it differs from the
+The record is written once the tick's decisions are made, so a tick that fails before that -- a
+listing that throws, say -- is reported by the failure itself rather than by a heartbeat claiming a
+tick it did not finish. The counts go out on every tick that completes; the per-pull-request list is written only when it differs from the
 tick before. A repository with a steady set of open pull requests would otherwise multiply that set
 into the record stream once a minute forever, and the JSONL cache is disk, which Principle IV meters
 like anything else. The unchanging detail carries nothing the previous tick did not; the counts are

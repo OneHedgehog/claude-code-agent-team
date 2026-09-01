@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { parseArgs } from "../../src/cli.js";
 
@@ -648,6 +648,20 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     };
   }
 
+  /** Slot directories this block created, removed when it finishes rather than left in TMPDIR. */
+  const slotDirectories: string[] = [];
+
+  function slotsDirectory(): string {
+    const directory = mkdtempSync(join(tmpdir(), "slots-"));
+    slotDirectories.push(directory);
+
+    return directory;
+  }
+
+  afterAll(() => {
+    for (const directory of slotDirectories) rmSync(directory, { recursive: true, force: true });
+  });
+
   /** A concluded, passing gate run for `ref`. Complete, so the predicate reads real fields. */
   function passingGateRun(ref: string): CheckRunSummary {
     return {
@@ -789,7 +803,7 @@ describe("the daemon's heartbeat (Principle VII)", () => {
       // A selected pull request is actually run, and running one takes a host lease from a
       // directory shared by every agent on the machine. Redirected so the test neither depends on
       // that directory nor competes with anything else holding a slot in it.
-      env: { XDG_STATE_HOME: mkdtempSync(join(tmpdir(), "slots-")) },
+      env: { XDG_STATE_HOME: slotsDirectory() },
     });
 
     expect(heartbeats()[0]?.tick).toEqual({
