@@ -186,6 +186,12 @@ export interface ComposeOptions {
   readonly octokit?: Octokit;
   readonly graphqlClient?: typeof graphql;
   readonly model?: ModelClient;
+  /**
+   * The transport the real adapter is built on. Injectable for the same reason `octokit` is: it is
+   * the only way to exercise what this root *wires* -- the rejected-location record, the clamp --
+   * rather than substituting the adapter and testing neither.
+   */
+  readonly messages?: MessagesApi;
   readonly logger?: Logger;
   readonly ledger?: Ledger;
   readonly settings?: LoadedSettings;
@@ -585,7 +591,7 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           credential: modelCredential,
           // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
           // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
-          messages: anthropicMessages(modelCredential),
+          messages: options.messages ?? anthropicMessages(modelCredential),
           // A refused location is a fact about model output, and one of its causes is an attempt
           // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
           onRejectedLocation: (rejection) =>

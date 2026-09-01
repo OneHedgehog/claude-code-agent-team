@@ -529,3 +529,84 @@ describe("settings the root loads are the settings the schema publishes", () => 
     );
   });
 });
+
+describe("what the root wires to the real adapter (Principle II)", () => {
+  /** A transport that answers with one finding whose location tries to leave the checkout. */
+  function messagesReturning(path: string) {
+    return {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async create(): Promise<unknown> {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                findings: [
+                  {
+                    rule: "r",
+                    severity: "low",
+                    blocking: false,
+                    location: { pullRequestLevel: false, path, line: 1, side: "RIGHT" },
+                    description: "d",
+                  },
+                ],
+                verdict: "approve",
+                replyJudgements: [],
+              }),
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 10 },
+        };
+      },
+    };
+  }
+
+  it("records location.rejected when the real adapter refuses a path", async () => {
+    // Substituting `model` would test neither the adapter nor this wiring. Deleting the
+    // `onRejectedLocation` argument in the root must fail a test, and this is that test.
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-wiring", write: (line) => records.push(line) });
+
+    const { model: _unused, ...withoutModel } = stubs(emptyCalls(), { logger });
+    const adapters = await composeService({
+      ...withoutModel,
+      messages: messagesReturning("../../etc/passwd"),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-wiring" });
+
+    const rejected = records
+      .map((line) => JSON.parse(line) as { event: string; location?: unknown })
+      .filter((record) => record.event === "location.rejected");
+
+    // One per role: both reviewers call the model, and both are handed the same bad location.
+    expect(rejected).toHaveLength(2);
+    for (const record of rejected) {
+      expect(record.location).toEqual({
+        path: "../../etc/passwd",
+        reason: "path is empty, rooted, or contains a `..` segment",
+      });
+    }
+  });
+
+  it("says nothing when the adapter accepts the path", async () => {
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-wiring", write: (line) => records.push(line) });
+
+    const { model: _unused, ...withoutModel } = stubs(emptyCalls(), { logger });
+    const adapters = await composeService({
+      ...withoutModel,
+      messages: messagesReturning("src/cli.ts"),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-wiring" });
+
+    expect(
+      records
+        .map((line) => JSON.parse(line) as { event: string })
+        .filter((r) => r.event === "location.rejected"),
+    ).toEqual([]);
+  });
+});
