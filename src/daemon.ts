@@ -474,7 +474,12 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
     const skipped = tick.considered
       .filter((selection) => !selection.select)
       .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }));
-    const signature = JSON.stringify(skipped);
+    // Sorted before it becomes a key: the list arrives in whatever order the listing returned, and
+    // an order that varied across ticks for an otherwise identical set would look like a change and
+    // write the list again. A dedup key that depends on someone else's iteration order is not one.
+    const signature = JSON.stringify(
+      [...skipped].sort((left, right) => left.pullRequest - right.pullRequest),
+    );
     const skippedChanged = signature !== lastSkipped;
     lastSkipped = signature;
 
