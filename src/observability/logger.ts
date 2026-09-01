@@ -82,6 +82,7 @@ export interface RecordFields {
   readonly location?: {
     readonly path: string;
     readonly reason: string;
+  };
   /** The daemon's per-tick heartbeat: what it saw, what it chose, and why it passed on the rest. */
   readonly tick?: {
     /** `true` when the listing answered `304` -- nothing changed, and it cost no rate limit. */

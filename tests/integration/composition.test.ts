@@ -609,6 +609,9 @@ describe("what the root wires to the real adapter (Principle II)", () => {
         .map((line) => JSON.parse(line) as { event: string })
         .filter((r) => r.event === "location.rejected"),
     ).toEqual([]);
+  });
+});
+
 describe("the daemon's heartbeat (Principle VII)", () => {
   /** Runs exactly one tick body: `runDaemon` consults `running()` once to enter and once to loop. */
   function oneTick(): () => boolean {
@@ -620,6 +623,97 @@ describe("the daemon's heartbeat (Principle VII)", () => {
       return calls === 1;
     };
   }
+
+  /** Adapters from the root, with the two reads a tick makes replaced. */
+  async function adaptersListing(
+    listing: { pullRequests: { number: number; headSha: string }[] | null; etag: string | null },
+    gateRuns: (ref: string) => unknown[] = () => [],
+  ) {
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+
+    return {
+      ...base,
+      listOpenPullRequests: () => Promise.resolve(listing),
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve(gateRuns(params.ref)),
+      },
+    } as typeof base;
+  }
+
+  let records: string[] = [];
+  let sharedLogger = createLogger({ runId: "run-daemon", write: () => undefined });
+
+  function capture() {
+    records = [];
+    sharedLogger = createLogger({ runId: "run-daemon", write: (line) => records.push(line) });
+  }
+
+  function heartbeats() {
+    return records
+      .map((line) => JSON.parse(line) as { event: string; tick?: Record<string, unknown> })
+      .filter((record) => record.event === "tick.completed");
+  }
+
+  it("records the 304 tick, which is the case that motivates the heartbeat", async () => {
+    // The idling daemon answers `304` tick after tick. That path carries the `unchanged` field and
+    // is the reason the record is claimed to cost nothing against FR-040, and it was untested.
+    capture();
+    const adapters = await adaptersListing({ pullRequests: null, etag: 'W/"unchanged"' });
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(heartbeats()).toHaveLength(1);
+    expect(heartbeats()[0]?.tick).toEqual({
+      unchanged: true,
+      considered: 0,
+      selected: 0,
+      skipped: [],
+    });
+  });
+
+  it("reports one skip entry per passed-over pull request, with its reason", async () => {
+    capture();
+    // Both have a concluded, passing gate run for their head, so both are skipped without a
+    // thread read -- which exercises the projection and the reason strings the document lists.
+    const adapters = await adaptersListing(
+      {
+        pullRequests: [
+          { number: 11, headSha: "a".repeat(40) },
+          { number: 12, headSha: "b".repeat(40) },
+        ],
+        etag: 'W/"listing"',
+      },
+      (ref) => [
+        { name: MERGE_GATE_CHECK_NAME, headSha: ref, status: "completed", conclusion: "success" },
+      ],
+    );
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(heartbeats()[0]?.tick).toEqual({
+      unchanged: false,
+      considered: 2,
+      selected: 0,
+      skipped: [
+        { pullRequest: 11, reason: "gate-run-did-not-fail" },
+        { pullRequest: 12, reason: "gate-run-did-not-fail" },
+      ],
+    });
+  });
 
   it("emits exactly one tick.completed on a tick that selects nothing", async () => {
     // The motivating case, and the one every other event misses: an idle tick. Every other record
