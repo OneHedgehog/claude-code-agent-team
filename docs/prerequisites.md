@@ -306,7 +306,7 @@ It must be set through the API, for the reason in [the ordering note](#order-to-
 is passed explicitly because a `PATCH` omitting it would drop the up-to-date-branch requirement:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
+security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
 ```
 
 Success prints `"checks": [{"context": "independent-review", ...}]`. A `403` is the PAT lacking
@@ -318,7 +318,7 @@ service reports the check green on each head SHA, and `enforce_admins` means you
 as owner. Removing the requirement is the only escape:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
+security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
 ```
 
 The same command sets the fixture's gate — it is how [§6](#6-fixture-repository)'s 6d was done —
@@ -343,8 +343,13 @@ read back exactly as the spec records it: `enforce_admins.enabled` true,
 `required_status_checks.checks` `["independent-review"]`, and `required_approving_review_count` 1.
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
+security find-generic-password -s github-mcp-pat -w | sed 's/.*/header = "Authorization: Bearer &"/' | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
 ```
+
+The token is piped into `curl --config -` rather than interpolated into a variable. Both forms read
+it from the keychain, which the secrets constraint requires, but a variable puts it in the shell's
+history file and in `curl`'s `argv`, where any other process on the host can read it out of `ps`.
+Piped, it exists only on a file descriptor between the two processes.
 
 The commands that add and remove the gate itself are earlier in this section.
 
