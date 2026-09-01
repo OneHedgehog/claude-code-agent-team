@@ -355,8 +355,7 @@ Piped, it exists only on a file descriptor between the two processes.
 
 The commands that add and remove the gate itself are earlier in this section.
 
-**The waiver is spent.** It applied once, to the change that introduced the gate. A later pull
-request over the reviewable limit is split, which is what FR-037 asks for.
+The waiver is spent; the spec's scope-and-expiry clause is the record of that.
 
 ---
 
