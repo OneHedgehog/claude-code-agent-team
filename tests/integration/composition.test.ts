@@ -6,6 +6,7 @@ import { parseArgs } from "../../src/cli.js";
 
 import {
   composeService,
+  estimateReviewTokens,
   ledgerPath,
   reviewPullRequest,
   type ComposeOptions,
@@ -310,43 +311,22 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
     expect(calls.reviewsSubmitted).toContain("REQUEST_CHANGES");
   });
 
-  it("never lets a response emit more than the ledger authorised (Principle IV)", async () => {
-    // The regression: `max_tokens` began as a slice of the reservation (1.25M -- past what any
-    // model emits, so every call failed), then became the model's own ceiling alone, which crossed
-    // the other way. With a small reserve, 16,000 is *more* than the run was authorised to spend,
-    // and the pre-flight budget check would not notice.
-    let seen = -1;
-    const model: ModelClient = {
-      review: (request) => {
-        seen = request.maxTokens;
+  it("reserves what a review actually consumes, not a slice of an unrelated number", () => {
+    // The regression this replaces: the reservation was `reviewerTokenReserve / 4` -- 1,250,000 per
+    // role for a review that spends tens of thousands -- so a run could be refused for failing to
+    // reserve millions it was never going to use. The estimate is now the prompt plus the response
+    // ceiling, and the prompt is dominated by the diff, which is already in hand.
+    const small = estimateReviewTokens(0, MAX_OUTPUT_TOKENS);
+    const large = estimateReviewTokens(400_000, MAX_OUTPUT_TOKENS);
 
-        return Promise.resolve({
-          verdict: "approve",
-          findings: [],
-          replyJudgements: [],
-          usage: { inputTokens: 10, outputTokens: 10 },
-        });
-      },
-    };
-
-    const settings: LoadedSettings = {
-      ...SETTINGS,
-      settings: { ...SETTINGS.settings, reviewerTokenReserve: 40_000 },
-    };
-
-    const adapters = await composeService({
-      ...stubs(emptyCalls(), { model, settings }),
-      graphqlClient: noThreads(),
-    });
-
-    await reviewPullRequest(adapters, 7, { runId: "run-composition" });
-
-    // 40,000 / 4 = 10,000, which is below MAX_OUTPUT_TOKENS and therefore the binding constraint.
-    expect(seen).toBe(10_000);
-    expect(seen).toBeLessThan(MAX_OUTPUT_TOKENS);
+    expect(large).toBeGreaterThan(small);
+    // Whatever else it is, it always covers everything the response may emit (Principle IV).
+    expect(small).toBeGreaterThanOrEqual(MAX_OUTPUT_TOKENS);
+    // And it stays in the range a review actually costs rather than the millions it replaced.
+    expect(small).toBeLessThan(1_000_000);
   });
 
-  it("falls back to the model's ceiling when the reservation is the larger of the two", async () => {
+  it("asks the model for the model's ceiling, which no budget arithmetic derives", async () => {
     let seen = -1;
     const model: ModelClient = {
       review: (request) => {
@@ -368,7 +348,6 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
 
     await reviewPullRequest(adapters, 7, { runId: "run-composition" });
 
-    // The repository's own reserve divides to 1,250,000, so the model's ceiling binds instead.
     expect(seen).toBe(MAX_OUTPUT_TOKENS);
   });
 

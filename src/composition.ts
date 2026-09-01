@@ -744,6 +744,27 @@ export async function notify(
   });
 }
 
+/**
+ * Roughly four characters per token, the standard approximation for prose and code. Exact counting
+ * needs an API round trip per review; this number only has to be close enough to refuse a run that
+ * cannot afford itself, and being approximate is why the overhead below is generous rather than
+ * measured.
+ */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * What a role's prompt carries besides the diff: the constitution, the role brief, the injection
+ * guard, and any prior findings. Deliberately an over-estimate -- reserving slightly too much
+ * refuses a review at the very edge of the budget, while reserving too little lets one run past it,
+ * and only the second failure spends money it did not have.
+ */
+const PROMPT_OVERHEAD_TOKENS = 25_000;
+
+/** What one role is expected to consume: its prompt, plus everything it may emit. */
+export function estimateReviewTokens(diffLength: number, maxOutputTokens: number): number {
+  return Math.ceil(diffLength / CHARS_PER_TOKEN) + PROMPT_OVERHEAD_TOKENS + maxOutputTokens;
+}
+
 async function stop(
   adapters: ServiceAdapters,
   pullRequest: number,
@@ -938,20 +959,24 @@ export async function reviewPullRequest(
     });
   }
 
-  // Two numbers that used to be one, and must not become independent either.
+  // What a review may emit, and what it is expected to cost. They are different numbers and each
+  // has been wrong once.
   //
-  // `reservation` is the budget check: a conservative per-role ceiling drawn from
-  // `reviewerTokenReserve`. `maxTokens` is what a single response may *emit*. Deriving the second
-  // from the first asked for 1.25M output tokens -- past what any model emits -- and failed every
-  // call before it was sent. But simply replacing it with the model's own ceiling broke the other
-  // direction: with a `reviewerTokenReserve` under 64,000, a response could emit more than the
-  // ledger had authorised, and Principle IV requires a metered resource to be checked *before* the
-  // work that consumes it.
+  // `maxTokens` is the per-response ceiling: the model's own limit, nothing to do with budget.
+  // Deriving it from `reviewerTokenReserve` asked for 1.25M output tokens and failed every call
+  // before it was sent.
   //
-  // The lower of the two satisfies both. A response can never exceed what the model will produce,
-  // and never exceed what was reserved for it.
-  const reservation = Math.max(1, Math.floor(operating.reviewerTokenReserve / 4));
-  const maxTokens = Math.min(MAX_OUTPUT_TOKENS, reservation);
+  // The reservation is what the ledger is asked to authorise, and it must be what the work can
+  // actually consume -- Principle IV checks a metered resource *before* the work that spends it,
+  // which is only meaningful if the number checked resembles the bill. A slice of
+  // `reviewerTokenReserve` did not: it reserved 1,250,000 per role for a review that spends tens
+  // of thousands, so a run could be refused for failing to reserve millions it was never going to
+  // use.
+  //
+  // Input dominates, and it is knowable here: the diff is already in hand. An observed run spent
+  // roughly 58,000 tokens across two roles against a 16,000-token ceiling, almost all of it prompt.
+  const maxTokens = MAX_OUTPUT_TOKENS;
+  const reservation = estimateReviewTokens(diff.length, maxTokens);
 
   // checkingBudgets (FR-031, FR-047). The estimate is the per-role ceiling times the roles that run.
   const budget = adapters.ledger.check(

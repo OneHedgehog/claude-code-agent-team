@@ -198,6 +198,15 @@ authorised whenever `reviewerTokenReserve` was under 64,000. A caller asking for
 clamped rather than trusted, because the failure otherwise arrives as a vague streaming error rather
 than as anything naming the arithmetic.
 
+**The budget reserves what a review costs, not a slice of the reserve.** Before a role runs, the
+ledger is asked to authorise an estimate: the prompt -- dominated by the diff, which is already in
+hand -- plus everything the response may emit. It replaced a per-role slice of
+`reviewerTokenReserve`, which reserved over a million tokens for a review that spends tens of
+thousands and could therefore refuse a run for failing to reserve capacity it was never going to
+use. The estimate is approximate by design (four characters to a token, with a generous prompt
+overhead): it exists to stop a run that cannot afford itself, and reserving slightly too much fails
+safe where reserving too little does not.
+
 **A finding's location arrives flat and becomes a union at the boundary.** Structured outputs rejects
 `oneOf` -- "Schema type 'oneOf' is not supported" -- so the wire schema carries one object with a
 `pullRequestLevel` discriminant and three fields that are ignored when it is set. `normalizeLocation`
