@@ -237,9 +237,12 @@ record on each poll: whether the listing was a `304`, how many open pull request
 considered, how many it selected, and -- for each one it passed over -- the cheap condition that
 excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
 
-The record is written once the tick's decisions are made, so a tick that fails before that -- a
-listing that throws, say -- is reported by the failure itself rather than by a heartbeat claiming a
-tick it did not finish. An absent list means "unchanged since it was last written", never "nothing was skipped" -- those are
+The record is written once the tick's decisions are made. A tick that fails before that -- a listing
+that throws, say -- currently records **nothing at all**: the exception propagates out of the loop,
+and the heartbeat's guarantee does not extend to it. That is the same silent-exit gap described
+below, and closing it means catching around the tick body so a failed tick logs and the loop
+continues. It is separate work and it has not been done; an operator looking for evidence of a
+crashed tick will not find any here. An absent list means "unchanged since it was last written", never "nothing was skipped" -- those are
 different facts and `skipped: []` states the second one explicitly. A `304` tick omits the list
 entirely rather than claiming an empty one, because it examined no listing and so learned nothing
 about what is being passed over. The counts go out on every tick that completes; the per-pull-request list is written only when it differs from the
