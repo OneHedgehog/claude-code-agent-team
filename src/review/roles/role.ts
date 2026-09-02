@@ -41,9 +41,6 @@ export interface RoleResult {
   /** Always reported, including on the error path, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
   readonly tokensConsumed: number;
-  /** Carried up so the run's record can show whether the prompt cache actually matched. */
-  readonly cacheWriteTokens: number;
-  readonly cacheReadTokens: number;
 }
 
 export interface ReviewerRole {
@@ -94,8 +91,6 @@ export async function runRole(
       replyJudgements: response.replyJudgements,
       usage: response.usage,
       tokensConsumed: totalTokens(response.usage),
-      cacheWriteTokens: response.usage.cacheWriteTokens,
-      cacheReadTokens: response.usage.cacheReadTokens,
     };
   } catch (error) {
     const usage = error instanceof ModelError ? error.usage : NO_USAGE;
@@ -109,8 +104,6 @@ export async function runRole(
       replyJudgements: [],
       usage,
       tokensConsumed: totalTokens(usage),
-      cacheWriteTokens: usage.cacheWriteTokens,
-      cacheReadTokens: usage.cacheReadTokens,
     };
   }
 }
