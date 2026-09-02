@@ -1,7 +1,7 @@
 # Feature Specification: The Bootstrap Exception
 
-**Feature Branch**: `record-bootstrap-exception` (deleted after its squash merge, per the
-Development Workflow's post-merge continuation — cite the merge commit on `main`, not this ref)
+**Feature Branch**: `record-bootstrap-exception` — the Development Workflow deletes a feature branch
+on merge, so cite this record's merge commit on `main` rather than this ref, which will not resolve
 
 **Created**: 2026-08-30
 
