@@ -332,10 +332,10 @@ The service **verifies this and never writes it.** That is the whole reason the 
 The gate could not review its own introduction. `main` took one merge under an `enforce_admins`
 bypass, which was restored immediately afterwards.
 
-**The authority for that waiver — what was overridden, by whom, when, why, and what it leaves
-unreviewed — is [specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), and only
-there.** This page is rewritten whenever a prerequisite changes; a spec never is, which is where
-Principle VI's recorded, human-approved reason belongs. The account itself lives only in the spec. The settings named below are
+**The account itself lives only in
+[specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md)** — what was overridden, by
+whom, when, why, and what it leaves unreviewed. This page is rewritten whenever a prerequisite
+changes; a spec never is, which is where Principle VI's recorded, human-approved reason belongs. The settings named below are
 repeated on purpose, because checking them is the operational task this page exists for, and a
 verification step that made you open another document to learn what to expect would not be one.
 
@@ -348,11 +348,12 @@ T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "
 ```
 
 The token never reaches `curl`'s `argv`, where any other process on the host could read it out of
-`ps` — it is piped in through `--config -` instead. `printf` is a shell builtin, so no separate
-process is spawned to carry it either. And the `&&` matters: without it, a missing or renamed
-keychain entry leaves `curl` making an *unauthenticated* request, which against a public repository
-returns data rather than a `401` and reads like success. `unset T` afterwards, so the value does not
-outlive the command in an interactive shell.
+`ps` — it is piped in through `--config -` instead. In `bash` and `zsh` `printf` is a builtin, so no
+separate process carries it either; a shell that execs `/usr/bin/printf` would put it in *that*
+process's `argv`, which is worth knowing before adapting the command elsewhere. And the `&&` matters:
+without it a failed keychain lookup still runs `curl`, so a missing credential could be mistaken for
+a result instead of stopping the command. `unset T` afterwards, so the value does not outlive the
+command in an interactive shell.
 
 The commands that add and remove the gate itself are earlier in this section.
 
