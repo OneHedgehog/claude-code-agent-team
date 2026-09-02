@@ -306,7 +306,7 @@ It must be set through the API, for the reason in [the ordering note](#order-to-
 is passed explicitly because a `PATCH` omitting it would drop the up-to-date-branch requirement:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'; unset T
 ```
 
 Success prints `"checks": [{"context": "independent-review", ...}]`. A `403` is the PAT lacking
@@ -318,7 +318,7 @@ service reports the check green on each head SHA, and `enforce_admins` means you
 as owner. Removing the requirement is the only escape:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)"; curl -s -X PATCH -H "Authorization: Bearer $T" -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'; unset T
 ```
 
 The same command sets the fixture's gate — it is how [§6](#6-fixture-repository)'s 6d was done —
@@ -326,6 +326,38 @@ with the repository path changed.
 
 The service **verifies this and never writes it.** That is the whole reason the App holds
 `administration: read` and not `write`.
+
+### The bootstrap exception, 2026-08-30
+
+The gate could not review its own introduction. `main` took one merge under an `enforce_admins`
+bypass, which was restored immediately afterwards.
+
+**The account itself lives only in
+[specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md)** — what was overridden, by
+whom, when, why, and what it leaves unreviewed. This page is rewritten whenever a prerequisite
+changes; a spec never is, which is where Principle VI's recorded, human-approved reason belongs. The settings named below are
+repeated on purpose, because checking them is the operational task this page exists for, and a
+verification step that made you open another document to learn what to expect would not be one.
+
+What this page owes you is the operational half — what to check, and how. The protection should
+read back exactly as the spec records it: `enforce_admins.enabled` true,
+`required_status_checks.checks` `["independent-review"]`, and `required_approving_review_count` 1.
+
+```bash
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection; unset T
+```
+
+The token never reaches `curl`'s `argv`, where any other process on the host could read it out of
+`ps` — it is piped in through `--config -` instead. In `bash` and `zsh` `printf` is a builtin, so no
+separate process carries it either; a shell that execs `/usr/bin/printf` would put it in *that*
+process's `argv`, which is worth knowing before adapting the command elsewhere. And the `&&` matters:
+without it a failed keychain lookup still runs `curl`, so a missing credential could be mistaken for
+a result instead of stopping the command. `unset T` afterwards, so the value does not outlive the
+command in an interactive shell.
+
+The commands that add and remove the gate itself are earlier in this section.
+
+The waiver is spent; the spec's scope-and-expiry clause is the record of that.
 
 ---
 
