@@ -13,7 +13,7 @@ import {
   type MessagesApi,
   type ModelCredential,
 } from "../../../src/model/anthropic.js";
-import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
+import { ModelError, totalTokens, type ReviewRequest } from "../../../src/model/client.js";
 
 const KEY = ["sk", "ant", "api03", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"].join("-");
 
@@ -591,6 +591,10 @@ describe("cache hits are recorded, so the saving is observable", () => {
     expect(response.usage.cacheReadTokens).toBe(10_800);
     expect(response.usage.cacheWriteTokens).toBe(0);
     expect(response.usage.inputTokens).toBe(2_008);
+
+    // And the ledger must see all of it. `input_tokens` excludes cached input, so a total of
+    // input + output alone would record 2,348 for a call that processed 13,148 tokens.
+    expect(totalTokens(response.usage)).toBe(2_008 + 340 + 10_800);
   });
 
   it("reports zeroes when the response says nothing about the cache", async () => {

@@ -9,7 +9,7 @@ import {
   scopedEnvironment,
   type AgentQuery,
 } from "../../../src/model/agent-sdk.js";
-import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
+import { ModelError, totalTokens, type ReviewRequest } from "../../../src/model/client.js";
 
 const WELL_FORMED = JSON.stringify({
   findings: [
@@ -232,10 +232,17 @@ describe("the response is consumed through the schema, exactly as on the API tra
 
     const response = await client.review(request());
 
-    // The harness caches its own prefix and reports it separately; ignoring it would hide the
-    // majority of what the run actually processed (FR-031).
-    expect(response.usage.inputTokens).toBe(10 + 26_000 + 4_000);
-    expect(response.usage.outputTokens).toBe(20);
+    // Reported apart, not folded into `inputTokens`. Before `ModelUsage` carried the cache fields
+    // this transport summed them into input, which was right then and would double-count now that
+    // `totalTokens` adds all four -- the two changes were written on separate branches.
+    expect(response.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheWriteTokens: 26_000,
+      cacheReadTokens: 4_000,
+    });
+    // And the metered total still carries the cached majority, which is the point (FR-031).
+    expect(totalTokens(response.usage)).toBe(10 + 20 + 26_000 + 4_000);
   });
 
   it("raises ModelError carrying the spend when the harness fails part-way through", async () => {
@@ -258,7 +265,12 @@ describe("the response is consumed through the schema, exactly as on the API tra
     expect(error).toBeInstanceOf(ModelError);
     // The second half of the contract, and the half the previous test dropped: what a failed call
     // consumed is still spend, and a ledger that lost it would under-count (FR-031).
-    expect((error as ModelError).usage).toEqual({ inputTokens: 700, outputTokens: 40 });
+    expect((error as ModelError).usage).toEqual({
+      inputTokens: 700,
+      outputTokens: 40,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("names an unauthenticated harness rather than folding it into a generic failure", async () => {
