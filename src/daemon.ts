@@ -480,8 +480,14 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
     const signature = JSON.stringify(
       [...skipped].sort((left, right) => left.pullRequest - right.pullRequest),
     );
-    const skippedChanged = signature !== lastSkipped;
-    lastSkipped = signature;
+
+    // A `304` examined no listing, so it learned nothing about what is being skipped -- the same
+    // pull requests are still open and still being passed over. Letting it record an empty
+    // signature would both claim `skipped: []` when that is false and reset the suppression, so
+    // the next changed tick would look identical to the one before it. An unchanged listing leaves
+    // the remembered set exactly as it was.
+    const skippedChanged = !tick.unchanged && signature !== lastSkipped;
+    if (!tick.unchanged) lastSkipped = signature;
 
     adapters.logger.info("tick.completed", {
       tick: {

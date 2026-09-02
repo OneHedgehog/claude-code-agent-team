@@ -723,6 +723,118 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     expect(second?.tick).toEqual({ unchanged: false, considered: 1, selected: 0 });
   });
 
+  it("writes the list again when the set actually changes", async () => {
+    capture();
+    // Suppression firing was tested; suppression *releasing* was not. Inverting the comparison, or
+    // assigning `lastSkipped` before it, would suppress the list forever after the first tick and
+    // every other test here would still pass.
+    let tick = 0;
+    const listings = [
+      { pullRequests: [{ number: 41, headSha: "a".repeat(40) }], etag: 'W/"one"' },
+      {
+        pullRequests: [
+          { number: 41, headSha: "a".repeat(40) },
+          { number: 42, headSha: "b".repeat(40) },
+        ],
+        etag: 'W/"two"',
+      },
+    ];
+
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+    const adapters = {
+      ...base,
+      listOpenPullRequests: () => {
+        tick += 1;
+
+        return Promise.resolve(
+          listings[Math.min(tick, listings.length) - 1] as (typeof listings)[0],
+        );
+      },
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve([passingGateRun(params.ref)]),
+      },
+    };
+
+    let calls = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        calls += 1;
+
+        return calls <= 3;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, second] = heartbeats();
+
+    expect(first?.tick).toMatchObject({
+      skipped: [{ pullRequest: 41, reason: "gate-run-did-not-fail" }],
+    });
+    expect(second?.tick).toMatchObject({
+      considered: 2,
+      skipped: [
+        { pullRequest: 41, reason: "gate-run-did-not-fail" },
+        { pullRequest: 42, reason: "gate-run-did-not-fail" },
+      ],
+    });
+  });
+
+  it("leaves the remembered set alone on a 304, which examined nothing", async () => {
+    capture();
+    // A `304` learned nothing about what is being skipped. Recording an empty signature would both
+    // claim `skipped: []` falsely and reset suppression, making the next changed tick look
+    // identical to the one before it.
+    const steady = { pullRequests: [{ number: 51, headSha: "c".repeat(40) }], etag: 'W/"s"' };
+    const responses = [steady, { pullRequests: null, etag: 'W/"s"' }, steady];
+    let index = 0;
+
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+    const adapters = {
+      ...base,
+      listOpenPullRequests: () => {
+        const response = responses[Math.min(index, responses.length - 1)];
+        index += 1;
+
+        return Promise.resolve(response as (typeof responses)[0]);
+      },
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve([passingGateRun(params.ref)]),
+      },
+    };
+
+    let calls = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        calls += 1;
+
+        return calls <= 5;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, unchanged, third] = heartbeats();
+
+    expect(first?.tick).toMatchObject({ skipped: [{ pullRequest: 51 }] });
+    // The 304 reports what it saw -- nothing -- and does not claim the set is now empty.
+    expect(unchanged?.tick).toEqual({ unchanged: true, considered: 0, selected: 0 });
+    // And the set it never learned about is still remembered, so this is still a repeat.
+    expect(third?.tick).toEqual({ unchanged: false, considered: 1, selected: 0 });
+  });
+
   it("records the 304 tick, which is the case that motivates the heartbeat", async () => {
     // The idling daemon answers `304` tick after tick. That path carries the `unchanged` field and
     // is the reason the record is claimed to cost nothing against FR-040, and it was untested.
@@ -737,12 +849,9 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     });
 
     expect(heartbeats()).toHaveLength(1);
-    expect(heartbeats()[0]?.tick).toEqual({
-      unchanged: true,
-      considered: 0,
-      selected: 0,
-      skipped: [],
-    });
+    // No `skipped`: a 304 examined no listing, so it reports what it saw rather than asserting that
+    // nothing is being passed over.
+    expect(heartbeats()[0]?.tick).toEqual({ unchanged: true, considered: 0, selected: 0 });
   });
 
   it("reports one skip entry per passed-over pull request, with its reason", async () => {

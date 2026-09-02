@@ -239,7 +239,10 @@ excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
 
 The record is written once the tick's decisions are made, so a tick that fails before that -- a
 listing that throws, say -- is reported by the failure itself rather than by a heartbeat claiming a
-tick it did not finish. The counts go out on every tick that completes; the per-pull-request list is written only when it differs from the
+tick it did not finish. An absent list means "unchanged since it was last written", never "nothing was skipped" -- those are
+different facts and `skipped: []` states the second one explicitly. A `304` tick omits the list
+entirely rather than claiming an empty one, because it examined no listing and so learned nothing
+about what is being passed over. The counts go out on every tick that completes; the per-pull-request list is written only when it differs from the
 tick before. A repository with a steady set of open pull requests would otherwise multiply that set
 into the record stream once a minute forever, and the JSONL cache is disk, which Principle IV meters
 like anything else. The unchanging detail carries nothing the previous tick did not; the counts are
