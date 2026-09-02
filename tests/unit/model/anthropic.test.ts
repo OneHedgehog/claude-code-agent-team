@@ -320,7 +320,12 @@ describe("usage is always reported (FR-031)", () => {
 
     const response = await client.review(request());
 
-    expect(response.usage).toEqual({ inputTokens: 1200, outputTokens: 340 });
+    expect(response.usage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 340,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("reports the tokens a schema-invalid response already consumed", async () => {
@@ -558,5 +563,43 @@ describe("prompt caching (the constitution is the only stable prefix)", () => {
 
     const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
     expect(blocks.map((b) => b.text).join("\n\n")).toBe(buildReviewPrompt(sent).userContent);
+  });
+});
+
+describe("cache hits are recorded, so the saving is observable", () => {
+  it("reports what was written to and read from the cache", async () => {
+    const messages = fakeMessages({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ findings: [], verdict: "approve", replyJudgements: [] }),
+        },
+      ],
+      usage: {
+        input_tokens: 2_008,
+        output_tokens: 340,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 10_800,
+      },
+    });
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const response = await client.review(request());
+
+    // The whole point: a cache that silently stopped matching bills full price and looks identical
+    // to one that is working. `cacheReadTokens` at zero across consecutive reviews is the symptom.
+    expect(response.usage.cacheReadTokens).toBe(10_800);
+    expect(response.usage.cacheWriteTokens).toBe(0);
+    expect(response.usage.inputTokens).toBe(2_008);
+  });
+
+  it("reports zeroes when the response says nothing about the cache", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const response = await client.review(request());
+
+    expect(response.usage.cacheReadTokens).toBe(0);
+    expect(response.usage.cacheWriteTokens).toBe(0);
   });
 });

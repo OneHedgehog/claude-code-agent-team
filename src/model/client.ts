@@ -78,7 +78,26 @@ export interface ReplyJudgement {
 export interface ModelUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /**
+   * Tokens written to the prompt cache, billed above the input rate, and tokens served from it,
+   * billed well below it.
+   *
+   * Recorded because the saving is otherwise unobservable: a cache that silently stopped matching
+   * -- a byte changed in the constitution, a breakpoint moved, a prefix that fell out before the
+   * next review -- costs full price and looks exactly like one that is working. `cacheReadTokens`
+   * staying at zero across consecutive reviews is the symptom, and nothing else reports it.
+   */
+  readonly cacheWriteTokens: number;
+  readonly cacheReadTokens: number;
 }
+
+/** No spend at all. Named once so a new construction site cannot quietly omit a field. */
+export const ZERO_USAGE: ModelUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheWriteTokens: 0,
+  cacheReadTokens: 0,
+};
 
 export interface ReviewResponse {
   readonly findings: readonly FindingDraft[];
@@ -103,7 +122,7 @@ export class ModelError extends Error {
   /** Tokens consumed before the failure, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
 
-  constructor(message: string, usage: ModelUsage = { inputTokens: 0, outputTokens: 0 }) {
+  constructor(message: string, usage: ModelUsage = ZERO_USAGE) {
     super(message);
     this.usage = usage;
   }

@@ -81,7 +81,7 @@ function stubs(calls: Calls, overrides: Partial<ComposeOptions> = {}): ComposeOp
         verdict: "approve",
         findings: [],
         replyJudgements: [],
-        usage: { inputTokens: 100, outputTokens: 50 },
+        usage: { inputTokens: 100, outputTokens: 50, cacheWriteTokens: 0, cacheReadTokens: 0 },
       }),
   };
 
@@ -336,7 +336,7 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
           verdict: "approve",
           findings: [],
           replyJudgements: [],
-          usage: { inputTokens: 10, outputTokens: 10 },
+          usage: { inputTokens: 10, outputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0 },
         });
       },
     };

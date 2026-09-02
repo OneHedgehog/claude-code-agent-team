@@ -203,6 +203,12 @@ write a cache nothing ever reads.
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
 prefix that has fallen out of cache costs full price to write again.
 
+**And the saving is recorded, because otherwise it is invisible.** Each run's record carries
+`cacheWriteTokens` and `cacheReadTokens` beside `tokensConsumed`. A cache that quietly stopped
+matching — a byte changed in the constitution, a breakpoint moved, a prefix that expired before the
+next review — bills full price and looks exactly like one that is working. `cacheReadTokens` sitting
+at zero across consecutive reviews is the only symptom there is, and nothing else would report it.
+
 **A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
 may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
 inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because

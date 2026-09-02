@@ -24,7 +24,12 @@ import type { Script } from "../../../src/model/scripted.js";
  * were spent, and one that asserts they were not, must be able to tell the two apart, and a double
  * reporting zero would make every run look like a run that stopped before spending (FR-031).
  */
-export const SCRIPTED_USAGE = { inputTokens: 1_000, outputTokens: 100 } as const;
+export const SCRIPTED_USAGE = {
+  inputTokens: 1_000,
+  outputTokens: 100,
+  cacheWriteTokens: 0,
+  cacheReadTokens: 0,
+} as const;
 
 export interface FindingOptions {
   readonly rule?: string;
