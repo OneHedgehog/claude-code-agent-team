@@ -610,3 +610,44 @@ describe("what the root wires to the real adapter (Principle II)", () => {
     ).toEqual([]);
   });
 });
+
+describe("the run record reports cache accounting (Principle IV)", () => {
+  it("carries the per-role cache totals into the record's usage block", async () => {
+    // The stubs were widened so they typecheck; nothing read the recorded values back. Deleting
+    // the aggregation in the composition root left every test green.
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-cache", write: (line) => records.push(line) });
+
+    const model: ModelClient = {
+      review: () =>
+        Promise.resolve({
+          verdict: "approve",
+          findings: [],
+          replyJudgements: [],
+          usage: {
+            inputTokens: 100,
+            outputTokens: 10,
+            cacheWriteTokens: 7,
+            cacheReadTokens: 11_000,
+          },
+        }),
+    };
+
+    const adapters = await composeService({
+      ...stubs(emptyCalls(), { model, logger }),
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-cache" });
+
+    const concluded = records
+      .map((line) => JSON.parse(line) as { event: string; usage?: Record<string, number> })
+      .filter((record) => record.event === "run.concluded");
+
+    // Two roles run, so each figure is doubled.
+    expect(concluded[0]?.usage?.["cacheReadTokens"]).toBe(22_000);
+    expect(concluded[0]?.usage?.["cacheWriteTokens"]).toBe(14);
+    // And the metered total includes them, rather than counting only what the API called "input".
+    expect(concluded[0]?.usage?.["tokensConsumed"]).toBe(2 * (100 + 10 + 7 + 11_000));
+  });
+});

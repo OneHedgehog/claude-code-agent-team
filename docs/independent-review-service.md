@@ -209,6 +209,12 @@ matching — a byte changed in the constitution, a breakpoint moved, a prefix th
 next review — bills full price and looks exactly like one that is working. `cacheReadTokens` sitting
 at zero across consecutive reviews is the only symptom there is, and nothing else would report it.
 
+Cached tokens also count toward the metered total. The API reports `input_tokens` *excluding*
+anything served from or written to the cache, so summing input and output alone stopped being the
+whole bill the moment the breakpoint was added: a review reading 10,800 cached tokens would have
+recorded around 2,000. Cheaper is not free, and a ledger that under-counted would have let the
+saving hide the spend — the exact failure FR-031 exists to prevent.
+
 **A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
 may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
 inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because

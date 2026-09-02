@@ -129,5 +129,10 @@ export class ModelError extends Error {
 }
 
 export function totalTokens(usage: ModelUsage): number {
-  return usage.inputTokens + usage.outputTokens;
+  // Cached input counts. The API reports `input_tokens` *excluding* anything served from or written
+  // to the cache, so summing input and output alone stopped being the whole bill the moment a cache
+  // breakpoint was added: a review reading 10,800 cached tokens would have recorded ~2,000. Cheaper
+  // is not free, and a ledger that under-counts is the failure FR-031 exists to prevent -- it would
+  // have let the saving hide the spend.
+  return usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
 }
