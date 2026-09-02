@@ -306,7 +306,7 @@ It must be set through the API, for the reason in [the ordering note](#order-to-
 is passed explicitly because a `PATCH` omitting it would drop the up-to-date-branch requirement:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[{"context":"independent-review"}]}'; unset T
 ```
 
 Success prints `"checks": [{"context": "independent-review", ...}]`. A `403` is the PAT lacking
@@ -318,7 +318,7 @@ service reports the check green on each head SHA, and `enforce_admins` means you
 as owner. Removing the requirement is the only escape:
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - -X PATCH -H "Accept: application/vnd.github+json" https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection/required_status_checks -d '{"strict":true,"checks":[]}'; unset T
 ```
 
 The same command sets the fixture's gate — it is how [§6](#6-fixture-repository)'s 6d was done —
@@ -335,8 +335,7 @@ bypass, which was restored immediately afterwards.
 **The authority for that waiver — what was overridden, by whom, when, why, and what it leaves
 unreviewed — is [specs/002-bootstrap-exception](../specs/002-bootstrap-exception/spec.md), and only
 there.** This page is rewritten whenever a prerequisite changes; a spec never is, which is where
-Principle VI's recorded, human-approved reason belongs. Nothing below restates the *reasoning* --
-what was overridden, why, and on whose authority all live in the spec. The settings named below are
+Principle VI's recorded, human-approved reason belongs. The account itself lives only in the spec. The settings named below are
 repeated on purpose, because checking them is the operational task this page exists for, and a
 verification step that made you open another document to learn what to expect would not be one.
 
@@ -345,14 +344,15 @@ read back exactly as the spec records it: `enforce_admins.enabled` true,
 `required_status_checks.checks` `["independent-review"]`, and `required_approving_review_count` 1.
 
 ```bash
-T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection
+T="$(security find-generic-password -s github-mcp-pat -w)" && printf 'header = "Authorization: Bearer %s"\n' "$T" | curl -s --config - https://api.github.com/repos/OneHedgehog/claude-code-agent-team/branches/main/protection; unset T
 ```
 
 The token never reaches `curl`'s `argv`, where any other process on the host could read it out of
-`ps` -- it is piped in through `--config -` instead. `printf` is a shell builtin, so no separate
+`ps` — it is piped in through `--config -` instead. `printf` is a shell builtin, so no separate
 process is spawned to carry it either. And the `&&` matters: without it, a missing or renamed
 keychain entry leaves `curl` making an *unauthenticated* request, which against a public repository
-returns data rather than a `401` and reads like success.
+returns data rather than a `401` and reads like success. `unset T` afterwards, so the value does not
+outlive the command in an interactive shell.
 
 The commands that add and remove the gate itself are earlier in this section.
 
