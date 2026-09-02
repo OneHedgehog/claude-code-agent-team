@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AnthropicModelClient,
+  buildReviewPrompt,
   MAX_OUTPUT_TOKENS,
   MissingCredentialError,
   parseReviewResponse,
@@ -513,5 +514,49 @@ describe("the location guard is tested on the ground it actually covers", () => 
     parsed("src/a.ts", (r) => rejections.push(r));
 
     expect(rejections).toEqual([]);
+  });
+});
+
+describe("prompt caching (the constitution is the only stable prefix)", () => {
+  type Sent = {
+    messages: { content: { type: string; text: string; cache_control?: unknown }[] }[];
+  };
+
+  it("marks the constitution cacheable and nothing after it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ constitution: "# Constitution\nrule one" }));
+
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.text).toContain("rule one");
+    expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+    // Caching is a prefix match: a breakpoint on the volatile half would cache a prefix that
+    // changes every review, which is worse than not caching at all -- it pays to write and never
+    // reads back.
+    expect(blocks[1]?.cache_control).toBeUndefined();
+  });
+
+  it("keeps the diff out of the cached block, so a new revision does not invalidate it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ diff: "@@ -1 +1 @@\n+const distinctive = 1;" }));
+
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks[0]?.text).not.toContain("distinctive");
+    expect(blocks[1]?.text).toContain("distinctive");
+  });
+
+  it("sends the same bytes it always did, in the same order", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+    const sent = request();
+
+    await client.review(sent);
+
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks.map((b) => b.text).join("\n\n")).toBe(buildReviewPrompt(sent).userContent);
   });
 });
