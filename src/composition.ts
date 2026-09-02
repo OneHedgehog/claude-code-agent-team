@@ -1169,8 +1169,8 @@ export async function reviewPullRequest(
   const tokensConsumed = results.reduce((sum, result) => sum + result.tokensConsumed, 0);
   // Recorded alongside the total, because the total alone cannot distinguish a working cache from
   // one that silently stopped matching -- both spend, only one spends ten times more.
-  const cacheWriteTokens = results.reduce((sum, result) => sum + result.cacheWriteTokens, 0);
-  const cacheReadTokens = results.reduce((sum, result) => sum + result.cacheReadTokens, 0);
+  const cacheWriteTokens = results.reduce((sum, result) => sum + result.usage.cacheWriteTokens, 0);
+  const cacheReadTokens = results.reduce((sum, result) => sum + result.usage.cacheReadTokens, 0);
   adapters.ledger.record({
     runId,
     at: now().toISOString(),

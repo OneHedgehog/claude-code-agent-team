@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   AnthropicModelClient,
-  buildReviewPrompt,
   MAX_OUTPUT_TOKENS,
   MissingCredentialError,
   parseReviewResponse,
@@ -554,15 +553,31 @@ describe("prompt caching (the constitution is the only stable prefix)", () => {
     expect(blocks[1]?.text).toContain("distinctive");
   });
 
-  it("sends the same bytes it always did, in the same order", async () => {
+  it("splits the prompt without changing what it says", async () => {
     const messages = fakeMessages(WELL_FORMED);
     const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
-    const sent = request();
 
-    await client.review(sent);
+    await client.review(
+      request({
+        constitution: "CONSTITUTION BODY",
+        diff: "DIFF BODY",
+        pullRequestContext: { title: "T", body: "B", specPaths: [] },
+        priorFindings: [],
+      }),
+    );
 
+    // Pinned against literals rather than against `buildReviewPrompt`, which produces both sides of
+    // the comparison and so cannot detect a change to the prompt text itself -- the very thing this
+    // guard is named for.
     const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
-    expect(blocks.map((b) => b.text).join("\n\n")).toBe(buildReviewPrompt(sent).userContent);
+    expect(blocks[0]?.text).toBe(
+      "--- BEGIN CONSTITUTION ---\nCONSTITUTION BODY\n--- END CONSTITUTION ---",
+    );
+    expect(blocks[1]?.text).toContain("--- BEGIN DIFF ---\nDIFF BODY\n--- END DIFF ---");
+    expect(blocks[1]?.text).toContain('"title":"T"');
+    expect(blocks[1]?.text).toContain(
+      "--- BEGIN PRIOR FINDINGS ---\n[]\n--- END PRIOR FINDINGS ---",
+    );
   });
 });
 

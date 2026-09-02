@@ -151,3 +151,33 @@ describe("no bare prose reaches standard output (FR-033)", () => {
     ).toContain("\n");
   });
 });
+
+describe("the usage block's new cache fields are part of the published contract", () => {
+  const base = {
+    runId: "11111111-1111-4111-8111-111111111111",
+    timestamp: "2026-09-02T00:00:00.000Z",
+    level: "info",
+    event: "run.concluded",
+  };
+
+  it("accepts a record carrying the cache counters", () => {
+    // `usage` is `additionalProperties: false`, so adding two keys to the emitted record without
+    // adding them to the schema would have produced records the published contract rejects --
+    // and nothing validated an emitted record against it.
+    expect(
+      validate({
+        ...base,
+        usage: {
+          tokensConsumed: 47_332,
+          budgetRemaining: 17_990_361,
+          cacheWriteTokens: 15_427,
+          cacheReadTokens: 15_427,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("still refuses a usage key the contract does not declare", () => {
+    expect(validate({ ...base, usage: { tokensConsumed: 1, cacheReadTokensss: 2 } })).toBe(false);
+  });
+});
