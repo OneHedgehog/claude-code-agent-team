@@ -233,6 +233,15 @@ export interface ReviewPrompt {
   /** The standing instruction, carried as a system prompt so no reviewed content can displace it. */
   readonly systemPrompt: string;
   /** Every untrusted field, delimited and labelled as data. */
+  /**
+   * The part of the user turn that never varies: the constitution, byte-identical for every role,
+   * every round, and every pull request. Sent as its own content block with a cache breakpoint,
+   * because caching is a prefix match and this is the only sizeable prefix there is.
+   */
+  readonly cacheablePrefix: string;
+  /** Everything that differs per review, sent after the breakpoint so it cannot invalidate it. */
+  readonly volatileContent: string;
+  /** The whole user turn in order — what is actually sent, and what the guard tests assert on. */
   readonly userContent: string;
 }
 
@@ -242,21 +251,30 @@ export interface ReviewPrompt {
  * is testing.
  */
 export function buildReviewPrompt(request: ReviewRequest): ReviewPrompt {
+  // Ordered by how often it changes, because a cache breakpoint only helps what precedes it.
+  // The constitution is ~11,000 tokens and was re-sent on every call: two roles times every round
+  // times every pull request, all of it identical. That was roughly a third of everything this
+  // service spent before the breakpoint below existed.
+  const cacheablePrefix = block("CONSTITUTION", request.constitution);
+
+  const volatileContent = [
+    block(
+      "PULL REQUEST",
+      JSON.stringify({
+        title: request.pullRequestContext.title,
+        body: request.pullRequestContext.body,
+        specPaths: request.pullRequestContext.specPaths,
+      }),
+    ),
+    block("DIFF", request.diff),
+    block("PRIOR FINDINGS", JSON.stringify(request.priorFindings)),
+  ].join("\n\n");
+
   return {
     systemPrompt: INJECTION_GUARD,
-    userContent: [
-      block("CONSTITUTION", request.constitution),
-      block(
-        "PULL REQUEST",
-        JSON.stringify({
-          title: request.pullRequestContext.title,
-          body: request.pullRequestContext.body,
-          specPaths: request.pullRequestContext.specPaths,
-        }),
-      ),
-      block("DIFF", request.diff),
-      block("PRIOR FINDINGS", JSON.stringify(request.priorFindings)),
-    ].join("\n\n"),
+    cacheablePrefix,
+    volatileContent,
+    userContent: [cacheablePrefix, volatileContent].join("\n\n"),
   };
 }
 
@@ -466,7 +484,21 @@ export class AnthropicModelClient implements ModelClient {
           effort: request.effort,
           format: { type: "json_schema", schema: REVIEW_RESPONSE_SCHEMA },
         },
-        messages: [{ role: "user", content: prompt.userContent }],
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt.cacheablePrefix,
+                // One hour rather than the five-minute default: reviews arrive minutes to hours
+                // apart, and a prefix that has fallen out of cache costs full price to write again.
+                cache_control: { type: "ephemeral", ttl: "1h" },
+              },
+              { type: "text", text: prompt.volatileContent },
+            ],
+          },
+        ],
       });
     } catch (error) {
       // The call never reached a response, so nothing was consumed. Reporting zero is still

@@ -188,6 +188,21 @@ with every run.
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
+**The constitution is sent once and cached, not re-sent on every call.** It is around 11,000 tokens
+and byte-identical for every role, every round, and every pull request — and it was being
+transmitted in full on each one. Across one working session that was 54 calls carrying the same
+document, roughly a third of everything the service spent.
+
+Caching is a prefix match, so the prompt is now ordered by how often each part changes: the
+injection guard and the constitution first, with an hour-long cache breakpoint after them, and the
+pull request, the diff, and prior findings after it. A cached prefix bills at about a tenth of the
+input rate, and the second role's call reads back what the first one wrote. The breakpoint is
+deliberately *not* on the volatile half: caching a prefix that changes every review would pay to
+write a cache nothing ever reads.
+
+An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
+prefix that has fallen out of cache costs full price to write again.
+
 **A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
 may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
 inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because
