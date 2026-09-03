@@ -242,14 +242,18 @@ that throws, say -- currently records **nothing at all**: the exception propagat
 and the heartbeat's guarantee does not extend to it. That is the same silent-exit gap described
 below, and closing it means catching around the tick body so a failed tick logs and the loop
 continues. It is separate work and it has not been done; an operator looking for evidence of a
-crashed tick will not find any here. An absent list means "unchanged since it was last written", never "nothing was skipped" -- those are
-different facts and `skipped: []` states the second one explicitly. A `304` tick omits the list
-entirely rather than claiming an empty one, because it examined no listing and so learned nothing
-about what is being passed over. The counts go out on every tick that completes; the per-pull-request list is written only when it differs from the
-tick before. A repository with a steady set of open pull requests would otherwise multiply that set
+crashed tick will not find any here.
+
+The counts go out on every tick that completes; the per-pull-request list is written only when it
+differs from the tick before. A repository with a steady set of open pull requests would otherwise multiply that set
 into the record stream once a minute forever, and the JSONL cache is disk, which Principle IV meters
 like anything else. The unchanging detail carries nothing the previous tick did not; the counts are
 what prove the loop is alive, so those always go.
+
+Reading the list therefore needs one convention: an absent list means "unchanged since it was last
+written", never "nothing was skipped" -- those are different facts, and `skipped: []` states the
+second one explicitly. A `304` tick omits the list rather than claiming an empty one, because it
+examined no listing and so learned nothing about what is being passed over.
 
 It is the only unconditional record the service writes, and it exists because everything else is
 conditional. A tick that selects nothing used to log nothing, so a daemon idling correctly and a
