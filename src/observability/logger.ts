@@ -30,6 +30,8 @@ export const REVIEW_EVENTS = [
   "platform.reserve_reached",
   "platform.wait_started",
   "platform.wait_ended",
+  // The daemon's per-tick heartbeat; see docs/independent-review-service.md for why it exists.
+  "tick.completed",
   "queue.wait_started",
   "queue.wait_exceeded",
   "role.started",
@@ -79,6 +81,15 @@ export interface RecordFields {
   readonly location?: {
     readonly path: string;
     readonly reason: string;
+  };
+  /** The daemon's per-tick heartbeat: what it saw, what it chose, and why it passed on the rest. */
+  readonly tick?: {
+    /** `true` when the listing answered `304` -- nothing changed, and it cost no rate limit. */
+    readonly unchanged: boolean;
+    readonly considered: number;
+    readonly selected: number;
+    /** Written only when it differs from the previous tick's; the counts above always are. */
+    readonly skipped?: readonly { readonly pullRequest: number; readonly reason: string }[];
   };
   readonly finding?: {
     readonly id: string;

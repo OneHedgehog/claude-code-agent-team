@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { parseArgs } from "../../src/cli.js";
 
@@ -12,7 +14,8 @@ import {
   type ComposeOptions,
 } from "../../src/composition.js";
 import { createTarget } from "../../src/config/target.js";
-import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
+import { MERGE_GATE_CHECK_NAME, type CheckRunSummary } from "../../src/github/check-run.js";
+import { runDaemon, type OpenPullRequest } from "../../src/daemon.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
@@ -608,5 +611,315 @@ describe("what the root wires to the real adapter (Principle II)", () => {
         .map((line) => JSON.parse(line) as { event: string })
         .filter((r) => r.event === "location.rejected"),
     ).toEqual([]);
+  });
+});
+
+describe("the daemon's heartbeat (Principle VII)", () => {
+  /** Runs exactly one tick body: `runDaemon` consults `running()` once to enter and once to loop. */
+  function oneTick(): () => boolean {
+    let calls = 0;
+
+    return () => {
+      calls += 1;
+
+      return calls === 1;
+    };
+  }
+
+  /** Adapters from the root, with the two reads a tick makes replaced. */
+  async function adaptersListing(
+    listing: { pullRequests: OpenPullRequest[] | null; etag: string | null },
+    // Typed rather than `unknown[]`: the predicate reads these fields, and a cast here would keep
+    // the file compiling while the stub drifted away from what the daemon actually consumes.
+    gateRuns: (ref: string) => CheckRunSummary[] = () => [],
+  ) {
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+
+    return {
+      ...base,
+      listOpenPullRequests: () => Promise.resolve(listing),
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve(gateRuns(params.ref)),
+      },
+    };
+  }
+
+  /** Slot directories this block created, removed when it finishes rather than left in TMPDIR. */
+  const slotDirectories: string[] = [];
+
+  function slotsDirectory(): string {
+    const directory = mkdtempSync(join(tmpdir(), "slots-"));
+    slotDirectories.push(directory);
+
+    return directory;
+  }
+
+  afterAll(() => {
+    for (const directory of slotDirectories) rmSync(directory, { recursive: true, force: true });
+  });
+
+  /** A concluded, passing gate run for `ref`. Complete, so the predicate reads real fields. */
+  function passingGateRun(ref: string): CheckRunSummary {
+    return {
+      id: 1,
+      name: MERGE_GATE_CHECK_NAME,
+      headSha: ref,
+      status: "completed",
+      conclusion: "success",
+      completedAt: "2026-09-01T00:00:00Z",
+      output: { title: "Independent review passed", text: null },
+    };
+  }
+
+  let records: string[] = [];
+  let sharedLogger = createLogger({ runId: "run-daemon", write: () => undefined });
+
+  function capture() {
+    records = [];
+    sharedLogger = createLogger({ runId: "run-daemon", write: (line) => records.push(line) });
+  }
+
+  function heartbeats() {
+    return records
+      .map((line) => JSON.parse(line) as { event: string; tick?: Record<string, unknown> })
+      .filter((record) => record.event === "tick.completed");
+  }
+
+  it("omits an unchanged skip list on the next tick, and keeps the counts", async () => {
+    capture();
+    // Three tick bodies over the same steady set; the first two are what this asserts. The counts prove the loop is alive on both; repeating
+    // the identical list into the record stream every tick is disk spent on nothing (Principle IV).
+    const adapters = await adaptersListing(
+      { pullRequests: [{ number: 31, headSha: "e".repeat(40) }], etag: 'W/"steady"' },
+      (ref) => [passingGateRun(ref)],
+    );
+
+    let ticks = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        ticks += 1;
+
+        return ticks <= 3;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, second] = heartbeats();
+
+    expect(first?.tick).toEqual({
+      unchanged: false,
+      considered: 1,
+      selected: 0,
+      skipped: [{ pullRequest: 31, reason: "gate-run-did-not-fail" }],
+    });
+    // Same set, so the list is not repeated -- but the heartbeat still fires.
+    expect(second?.tick).toEqual({ unchanged: false, considered: 1, selected: 0 });
+  });
+
+  it("writes the list again when the set actually changes", async () => {
+    capture();
+    // Suppression firing was tested; suppression *releasing* was not. Inverting the comparison, or
+    // assigning `lastSkipped` before it, would suppress the list forever after the first tick and
+    // every other test here would still pass.
+    let tick = 0;
+    const listings = [
+      { pullRequests: [{ number: 41, headSha: "a".repeat(40) }], etag: 'W/"one"' },
+      {
+        pullRequests: [
+          { number: 41, headSha: "a".repeat(40) },
+          { number: 42, headSha: "b".repeat(40) },
+        ],
+        etag: 'W/"two"',
+      },
+    ];
+
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+    const adapters = {
+      ...base,
+      listOpenPullRequests: () => {
+        tick += 1;
+
+        // `at(-1)` rather than a cast: the index is clamped, so the last entry is the intended
+        // fallback and the type follows from it instead of being asserted over.
+        return Promise.resolve(listings[Math.min(tick, listings.length) - 1] ?? listings.at(-1)!);
+      },
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve([passingGateRun(params.ref)]),
+      },
+    };
+
+    let calls = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        calls += 1;
+
+        return calls <= 3;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, second] = heartbeats();
+
+    expect(first?.tick).toMatchObject({
+      skipped: [{ pullRequest: 41, reason: "gate-run-did-not-fail" }],
+    });
+    expect(second?.tick).toMatchObject({
+      considered: 2,
+      skipped: [
+        { pullRequest: 41, reason: "gate-run-did-not-fail" },
+        { pullRequest: 42, reason: "gate-run-did-not-fail" },
+      ],
+    });
+  });
+
+  it("leaves the remembered set alone on a 304, which examined nothing", async () => {
+    capture();
+    // A `304` learned nothing about what is being skipped. Recording an empty signature would both
+    // claim `skipped: []` falsely and reset suppression, making the next changed tick look
+    // identical to the one before it. Five tick bodies run; the first three are what this asserts.
+    const steady = { pullRequests: [{ number: 51, headSha: "c".repeat(40) }], etag: 'W/"s"' };
+    const responses = [steady, { pullRequests: null, etag: 'W/"s"' }, steady];
+    let index = 0;
+
+    const base = await composeService({
+      ...stubs(emptyCalls(), { logger: sharedLogger }),
+      graphqlClient: noThreads(),
+    });
+    const adapters = {
+      ...base,
+      listOpenPullRequests: () => {
+        const response = responses[Math.min(index, responses.length - 1)] ?? responses.at(-1)!;
+        index += 1;
+
+        return Promise.resolve(response);
+      },
+      checkRuns: {
+        ...base.checkRuns,
+        listForRef: (params: { ref: string }) => Promise.resolve([passingGateRun(params.ref)]),
+      },
+    };
+
+    let calls = 0;
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: () => {
+        calls += 1;
+
+        return calls <= 5;
+      },
+      sleep: () => Promise.resolve(),
+    });
+
+    const [first, unchanged, third] = heartbeats();
+
+    expect(first?.tick).toMatchObject({ skipped: [{ pullRequest: 51 }] });
+    // The 304 reports what it saw -- nothing -- and does not claim the set is now empty.
+    expect(unchanged?.tick).toEqual({ unchanged: true, considered: 0, selected: 0 });
+    // And the set it never learned about is still remembered, so this is still a repeat.
+    expect(third?.tick).toEqual({ unchanged: false, considered: 1, selected: 0 });
+  });
+
+  it("records the 304 tick, which is the case that motivates the heartbeat", async () => {
+    // The idling daemon answers `304` tick after tick. That path carries the `unchanged` field and
+    // is the reason the record is claimed to cost nothing against FR-040, and it was untested.
+    capture();
+    const adapters = await adaptersListing({ pullRequests: null, etag: 'W/"unchanged"' });
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(heartbeats()).toHaveLength(1);
+    // No `skipped`: a 304 examined no listing, so it reports what it saw rather than asserting that
+    // nothing is being passed over.
+    expect(heartbeats()[0]?.tick).toEqual({ unchanged: true, considered: 0, selected: 0 });
+  });
+
+  it("reports one skip entry per passed-over pull request, with its reason", async () => {
+    capture();
+    // Both have a concluded, passing gate run for their head, so both are skipped without a
+    // thread read -- which exercises the projection and the reason strings the document lists.
+    const adapters = await adaptersListing(
+      {
+        pullRequests: [
+          { number: 11, headSha: "a".repeat(40) },
+          { number: 12, headSha: "b".repeat(40) },
+        ],
+        etag: 'W/"listing"',
+      },
+      (ref) => [passingGateRun(ref)],
+    );
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(heartbeats()[0]?.tick).toEqual({
+      unchanged: false,
+      considered: 2,
+      selected: 0,
+      skipped: [
+        { pullRequest: 11, reason: "gate-run-did-not-fail" },
+        { pullRequest: 12, reason: "gate-run-did-not-fail" },
+      ],
+    });
+  });
+
+  it("counts a selection as well as a skip, so `selected` is observed non-zero", async () => {
+    capture();
+    // One pull request with no gate run for its head (selected under clause (a)) and one with a
+    // concluded passing run (skipped). Every other test asserts `selected: 0`, so a heartbeat that
+    // hard-wired that field, or read the wrong collection, would still pass all of them.
+    const selectedSha = "c".repeat(40);
+    const adapters = await adaptersListing(
+      {
+        pullRequests: [
+          { number: 21, headSha: selectedSha },
+          { number: 22, headSha: "d".repeat(40) },
+        ],
+        etag: 'W/"mixed"',
+      },
+      (ref) => (ref === selectedSha ? [] : [passingGateRun(ref)]),
+    );
+
+    await runDaemon({
+      target: TARGET,
+      compose: () => Promise.resolve(adapters),
+      running: oneTick(),
+      sleep: () => Promise.resolve(),
+      // A selected pull request is actually run, and running one takes a host lease from a
+      // directory shared by every agent on the machine. Redirected so the test neither depends on
+      // that directory nor competes with anything else holding a slot in it.
+      env: { XDG_STATE_HOME: slotsDirectory() },
+    });
+
+    expect(heartbeats()[0]?.tick).toEqual({
+      unchanged: false,
+      considered: 2,
+      selected: 1,
+      skipped: [{ pullRequest: 22, reason: "gate-run-did-not-fail" }],
+    });
   });
 });
