@@ -73,7 +73,7 @@
     "role": { "enum": ["security", "implementation"] },
     "verdict": { "enum": ["approve", "request-changes"] },
     "tick": {
-      "description": "The daemon's per-tick heartbeat (Principle VII). Every other event is conditional, so without one unconditional record per tick a correctly idle daemon and a dead one produce identical output: none.",
+      "description": "The daemon's per-tick heartbeat: what it saw, what it selected, and why it passed over the rest.",
       "type": "object",
       "additionalProperties": false,
       "required": ["unchanged", "considered", "selected"],
