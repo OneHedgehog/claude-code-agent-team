@@ -95,6 +95,13 @@ export interface RecordFields {
   readonly usage?: {
     readonly tokensConsumed?: number;
     readonly budgetRemaining?: number;
+    /**
+     * Prompt-cache accounting. A cache that quietly stopped matching bills full price and looks
+     * exactly like one that is working, so `cacheReadTokens` staying at zero across consecutive
+     * reviews is the only symptom there is.
+     */
+    readonly cacheWriteTokens?: number;
+    readonly cacheReadTokens?: number;
     readonly platformRequestsUsed?: number;
     readonly platformRequestsRemaining?: number;
   };

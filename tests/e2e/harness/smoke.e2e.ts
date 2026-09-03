@@ -33,13 +33,13 @@ const APPROVING = {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100 },
+    usage: { inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0 },
   },
   implementation: {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100 },
+    usage: { inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0 },
   },
 };
 

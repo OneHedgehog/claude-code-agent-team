@@ -6,7 +6,7 @@ import type {
   PullRequestContext,
   ReplyJudgement,
 } from "../../model/client.js";
-import { ModelError, totalTokens } from "../../model/client.js";
+import { ModelError, totalTokens, ZERO_USAGE } from "../../model/client.js";
 import type { FindingDraftInput } from "../findings.js";
 import { missingVerdict, type RoleOutcome } from "../gate.js";
 
@@ -51,8 +51,6 @@ export interface ReviewerRole {
   review(input: RoleInput): Promise<RoleResult>;
 }
 
-const NO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
-
 /**
  * Runs one role's model call and shapes the result. Shared by both roles because the failure
  * handling — a model error becomes a missing verdict carrying the tokens already consumed — must
@@ -93,7 +91,7 @@ export async function runRole(
       tokensConsumed: totalTokens(response.usage),
     };
   } catch (error) {
-    const usage = error instanceof ModelError ? error.usage : NO_USAGE;
+    const usage = error instanceof ModelError ? error.usage : ZERO_USAGE;
     const reason = error instanceof Error ? error.message : String(error);
 
     return {

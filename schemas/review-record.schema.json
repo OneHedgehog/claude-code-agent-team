@@ -156,6 +156,8 @@
       "additionalProperties": false,
       "properties": {
         "tokensConsumed": { "type": "integer", "minimum": 0 },
+        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
+        "cacheReadTokens": { "type": "integer", "minimum": 0 },
         "budgetRemaining": { "type": "integer" },
         "platformRequestsUsed": { "type": "integer", "minimum": 0 },
         "platformRequestsRemaining": { "type": "integer" }

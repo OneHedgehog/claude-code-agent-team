@@ -78,7 +78,26 @@ export interface ReplyJudgement {
 export interface ModelUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /**
+   * Tokens written to the prompt cache, billed above the input rate, and tokens served from it,
+   * billed well below it.
+   *
+   * Recorded because the saving is otherwise unobservable: a cache that silently stopped matching
+   * -- a byte changed in the constitution, a breakpoint moved, a prefix that fell out before the
+   * next review -- costs full price and looks exactly like one that is working. `cacheReadTokens`
+   * staying at zero across consecutive reviews is the symptom, and nothing else reports it.
+   */
+  readonly cacheWriteTokens: number;
+  readonly cacheReadTokens: number;
 }
+
+/** No spend at all. Named once so a new construction site cannot quietly omit a field. */
+export const ZERO_USAGE: ModelUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheWriteTokens: 0,
+  cacheReadTokens: 0,
+};
 
 export interface ReviewResponse {
   readonly findings: readonly FindingDraft[];
@@ -103,12 +122,17 @@ export class ModelError extends Error {
   /** Tokens consumed before the failure, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
 
-  constructor(message: string, usage: ModelUsage = { inputTokens: 0, outputTokens: 0 }) {
+  constructor(message: string, usage: ModelUsage = ZERO_USAGE) {
     super(message);
     this.usage = usage;
   }
 }
 
 export function totalTokens(usage: ModelUsage): number {
-  return usage.inputTokens + usage.outputTokens;
+  // Cached input counts. The API reports `input_tokens` *excluding* anything served from or written
+  // to the cache, so summing input and output alone stopped being the whole bill the moment a cache
+  // breakpoint was added: a review reading 10,800 cached tokens would have recorded ~2,000. Cheaper
+  // is not free, and a ledger that under-counts is the failure FR-031 exists to prevent -- it would
+  // have let the saving hide the spend.
+  return usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
 }

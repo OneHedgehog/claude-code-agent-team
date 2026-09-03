@@ -12,7 +12,7 @@ import {
   type MessagesApi,
   type ModelCredential,
 } from "../../../src/model/anthropic.js";
-import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
+import { ModelError, totalTokens, type ReviewRequest } from "../../../src/model/client.js";
 
 const KEY = ["sk", "ant", "api03", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"].join("-");
 
@@ -319,7 +319,12 @@ describe("usage is always reported (FR-031)", () => {
 
     const response = await client.review(request());
 
-    expect(response.usage).toEqual({ inputTokens: 1200, outputTokens: 340 });
+    expect(response.usage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 340,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("reports the tokens a schema-invalid response already consumed", async () => {
@@ -513,5 +518,107 @@ describe("the location guard is tested on the ground it actually covers", () => 
     parsed("src/a.ts", (r) => rejections.push(r));
 
     expect(rejections).toEqual([]);
+  });
+});
+
+describe("prompt caching (the constitution is the only stable prefix)", () => {
+  type Sent = {
+    messages: { content: { type: string; text: string; cache_control?: unknown }[] }[];
+  };
+
+  it("marks the constitution cacheable and nothing after it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ constitution: "# Constitution\nrule one" }));
+
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.text).toContain("rule one");
+    expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+    // Caching is a prefix match: a breakpoint on the volatile half would cache a prefix that
+    // changes every review, which is worse than not caching at all -- it pays to write and never
+    // reads back.
+    expect(blocks[1]?.cache_control).toBeUndefined();
+  });
+
+  it("keeps the diff out of the cached block, so a new revision does not invalidate it", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(request({ diff: "@@ -1 +1 @@\n+const distinctive = 1;" }));
+
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks[0]?.text).not.toContain("distinctive");
+    expect(blocks[1]?.text).toContain("distinctive");
+  });
+
+  it("splits the prompt without changing what it says", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    await client.review(
+      request({
+        constitution: "CONSTITUTION BODY",
+        diff: "DIFF BODY",
+        pullRequestContext: { title: "T", body: "B", specPaths: [] },
+        priorFindings: [],
+      }),
+    );
+
+    // Pinned against literals rather than against `buildReviewPrompt`, which produces both sides of
+    // the comparison and so cannot detect a change to the prompt text itself -- the very thing this
+    // guard is named for.
+    const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    expect(blocks[0]?.text).toBe(
+      "--- BEGIN CONSTITUTION ---\nCONSTITUTION BODY\n--- END CONSTITUTION ---",
+    );
+    expect(blocks[1]?.text).toContain("--- BEGIN DIFF ---\nDIFF BODY\n--- END DIFF ---");
+    expect(blocks[1]?.text).toContain('"title":"T"');
+    expect(blocks[1]?.text).toContain(
+      "--- BEGIN PRIOR FINDINGS ---\n[]\n--- END PRIOR FINDINGS ---",
+    );
+  });
+});
+
+describe("cache hits are recorded, so the saving is observable", () => {
+  it("reports what was written to and read from the cache", async () => {
+    const messages = fakeMessages({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ findings: [], verdict: "approve", replyJudgements: [] }),
+        },
+      ],
+      usage: {
+        input_tokens: 2_008,
+        output_tokens: 340,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 10_800,
+      },
+    });
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const response = await client.review(request());
+
+    // The whole point: a cache that silently stopped matching bills full price and looks identical
+    // to one that is working. `cacheReadTokens` at zero across consecutive reviews is the symptom.
+    expect(response.usage.cacheReadTokens).toBe(10_800);
+    expect(response.usage.cacheWriteTokens).toBe(0);
+    expect(response.usage.inputTokens).toBe(2_008);
+
+    // And the ledger must see all of it. `input_tokens` excludes cached input, so a total of
+    // input + output alone would record 2,348 for a call that processed 13,148 tokens.
+    expect(totalTokens(response.usage)).toBe(2_008 + 340 + 10_800);
+  });
+
+  it("reports zeroes when the response says nothing about the cache", async () => {
+    const messages = fakeMessages(WELL_FORMED);
+    const client = new AnthropicModelClient({ credential: ENV_CREDENTIAL, messages });
+
+    const response = await client.review(request());
+
+    expect(response.usage.cacheReadTokens).toBe(0);
+    expect(response.usage.cacheWriteTokens).toBe(0);
   });
 });

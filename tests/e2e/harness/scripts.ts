@@ -24,7 +24,14 @@ import type { Script } from "../../../src/model/scripted.js";
  * were spent, and one that asserts they were not, must be able to tell the two apart, and a double
  * reporting zero would make every run look like a run that stopped before spending (FR-031).
  */
-export const SCRIPTED_USAGE = { inputTokens: 1_000, outputTokens: 100 } as const;
+export const SCRIPTED_USAGE = {
+  inputTokens: 1_000,
+  outputTokens: 100,
+  // Non-zero, so the e2e layer exercises the path a real review takes: the constitution is a cached
+  // prefix, and every scenario that asserts on spend would otherwise only ever see a cold call.
+  cacheWriteTokens: 200,
+  cacheReadTokens: 800,
+} as const;
 
 export interface FindingOptions {
   readonly rule?: string;
