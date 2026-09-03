@@ -203,11 +203,14 @@ write a cache nothing ever reads.
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
 prefix that has fallen out of cache costs full price to write again. The extended TTL is a versioned
 API capability, not a free parameter: `ttl: "1h"` is accepted by the pinned SDK and API surface and
-would be rejected or ignored by one that predates extended cache TTLs. It is verified by observation
-rather than by assertion — a run against the live endpoint reported `cacheWrite` and `cacheRead` of
-15,427 tokens each, the second role reading back exactly the prefix the first wrote. Had the TTL been
-silently ignored, `cacheRead` would have been zero and nothing else about the run would have
-differed, which is the whole reason the counters are recorded.
+would be rejected or ignored by one that predates extended cache TTLs. A live run reported `cacheWrite` and
+`cacheRead` of 15,427 tokens each, the second role reading back exactly the prefix the first wrote,
+so the request shape is accepted rather than rejected.
+
+That evidence does not, on its own, show the *hour* is honoured: both roles of one review run
+minutes apart, well inside the five-minute default, so an ignored `ttl` would look identical within
+a single run. What distinguishes them is a cache read on a run that starts more than five minutes
+after the previous one — visible in the counters, and the reason they are recorded at all.
 
 **And the saving is recorded, because otherwise it is invisible.** Each run's record carries
 `cacheWriteTokens` and `cacheReadTokens` beside `tokensConsumed`. A cache that quietly stopped
@@ -220,6 +223,13 @@ anything served from or written to the cache, so summing input and output alone 
 whole bill the moment the breakpoint was added: a review reading 10,800 cached tokens would have
 recorded around 2,000. Cheaper is not free, and a ledger that under-counted would have let the
 saving hide the spend — the exact failure FR-031 exists to prevent.
+
+The consequence is that `tokensConsumed` measures tokens *processed*, not credit spent: a review
+reading 10,800 cached tokens draws 10,800 against the budget while costing roughly a tenth of that.
+That is deliberate. `tokenBudget` has always been a token count rather than a currency, and counting
+raw errs in the safe direction — the reserve trips earlier than the money requires, never later.
+Making the budget a cost proxy means weighting three different rates and deciding what it is
+denominated in, which is a change to what the setting means and belongs in its own spec.
 
 **A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
 may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
