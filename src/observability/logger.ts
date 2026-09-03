@@ -30,8 +30,7 @@ export const REVIEW_EVENTS = [
   "platform.reserve_reached",
   "platform.wait_started",
   "platform.wait_ended",
-  // The daemon's per-tick heartbeat. Every other event here is conditional, so without this one a
-  // correctly idle daemon and a dead one write byte-identical output: none.
+  // The daemon's per-tick heartbeat; see docs/independent-review-service.md for why it exists.
   "tick.completed",
   "queue.wait_started",
   "queue.wait_exceeded",
