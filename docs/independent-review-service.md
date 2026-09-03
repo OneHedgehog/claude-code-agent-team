@@ -253,7 +253,10 @@ what prove the loop is alive, so those always go.
 Reading the list therefore needs one convention: an absent list means "unchanged since it was last
 written", never "nothing was skipped" -- those are different facts, and `skipped: []` states the
 second one explicitly. A `304` tick omits the list rather than claiming an empty one, because it
-examined no listing and so learned nothing about what is being passed over.
+examined no listing and so learned nothing about what is being passed over. Its `considered` and
+`selected` are both `0` for the same reason — they report what this tick examined, not what is open —
+so a `304` and a tick over an empty repository read alike in the counts and are told apart by
+`unchanged`.
 
 It is the only unconditional record the service writes, and it exists because everything else is
 conditional. A tick that selects nothing used to log nothing, so a daemon idling correctly and a

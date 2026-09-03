@@ -749,9 +749,9 @@ describe("the daemon's heartbeat (Principle VII)", () => {
       listOpenPullRequests: () => {
         tick += 1;
 
-        return Promise.resolve(
-          listings[Math.min(tick, listings.length) - 1] as (typeof listings)[0],
-        );
+        // `at(-1)` rather than a cast: the index is clamped, so the last entry is the intended
+        // fallback and the type follows from it instead of being asserted over.
+        return Promise.resolve(listings[Math.min(tick, listings.length) - 1] ?? listings.at(-1)!);
       },
       checkRuns: {
         ...base.checkRuns,
@@ -802,10 +802,10 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     const adapters = {
       ...base,
       listOpenPullRequests: () => {
-        const response = responses[Math.min(index, responses.length - 1)];
+        const response = responses[Math.min(index, responses.length - 1)] ?? responses.at(-1)!;
         index += 1;
 
-        return Promise.resolve(response as (typeof responses)[0]);
+        return Promise.resolve(response);
       },
       checkRuns: {
         ...base.checkRuns,
