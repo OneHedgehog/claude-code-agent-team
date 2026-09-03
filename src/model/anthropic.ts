@@ -231,14 +231,16 @@ function block(label: string, content: string): string {
 export interface ReviewPrompt {
   /** The standing instruction, carried as a system prompt so no reviewed content can displace it. */
   readonly systemPrompt: string;
-  /** Every untrusted field, delimited and labelled as data. */
   /**
    * The part of the user turn that never varies: the constitution, byte-identical for every role,
    * every round, and every pull request. Sent as its own content block with a cache breakpoint,
    * because caching is a prefix match and this is the only sizeable prefix there is.
    */
   readonly cacheablePrefix: string;
-  /** Everything that differs per review, sent after the breakpoint so it cannot invalidate it. */
+  /**
+   * Every untrusted field, delimited and labelled as data — and everything that differs per
+   * review, so it sits after the breakpoint where it cannot invalidate the cached prefix.
+   */
   readonly volatileContent: string;
   /**
    * The two parts joined, for readers of the prompt rather than for the request path. The client
