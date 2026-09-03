@@ -471,15 +471,14 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
     // and the JSONL cache is disk -- a metered resource under Principle IV. The counts still go out
     // every tick, because their whole purpose is to prove the loop is alive; it is the unchanging
     // detail behind them that carries no information the previous tick did not.
+    // Sorted once, then both compared and written in that order. Deciding on a sorted copy while
+    // recording the listing's order would let two records describing the identical set differ, and
+    // the record is the only witness there is.
     const skipped = tick.considered
       .filter((selection) => !selection.select)
-      .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }));
-    // Sorted before it becomes a key: the list arrives in whatever order the listing returned, and
-    // an order that varied across ticks for an otherwise identical set would look like a change and
-    // write the list again. A dedup key that depends on someone else's iteration order is not one.
-    const signature = JSON.stringify(
-      [...skipped].sort((left, right) => left.pullRequest - right.pullRequest),
-    );
+      .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }))
+      .sort((left, right) => left.pullRequest - right.pullRequest);
+    const signature = JSON.stringify(skipped);
 
     // A `304` examined no listing, so it learned nothing about what is being skipped -- the same
     // pull requests are still open and still being passed over. Letting it record an empty
