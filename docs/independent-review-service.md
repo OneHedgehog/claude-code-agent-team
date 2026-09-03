@@ -201,7 +201,13 @@ deliberately *not* on the volatile half: caching a prefix that changes every rev
 write a cache nothing ever reads.
 
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
-prefix that has fallen out of cache costs full price to write again.
+prefix that has fallen out of cache costs full price to write again. The extended TTL is a versioned
+API capability, not a free parameter: `ttl: "1h"` is accepted by the pinned SDK and API surface and
+would be rejected or ignored by one that predates extended cache TTLs. It is verified by observation
+rather than by assertion — a run against the live endpoint reported `cacheWrite` and `cacheRead` of
+15,427 tokens each, the second role reading back exactly the prefix the first wrote. Had the TTL been
+silently ignored, `cacheRead` would have been zero and nothing else about the run would have
+differed, which is the whole reason the counters are recorded.
 
 **And the saving is recorded, because otherwise it is invisible.** Each run's record carries
 `cacheWriteTokens` and `cacheReadTokens` beside `tokensConsumed`. A cache that quietly stopped

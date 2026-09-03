@@ -51,8 +51,6 @@ export interface ReviewerRole {
   review(input: RoleInput): Promise<RoleResult>;
 }
 
-const NO_USAGE: ModelUsage = ZERO_USAGE;
-
 /**
  * Runs one role's model call and shapes the result. Shared by both roles because the failure
  * handling — a model error becomes a missing verdict carrying the tokens already consumed — must
@@ -93,7 +91,7 @@ export async function runRole(
       tokensConsumed: totalTokens(response.usage),
     };
   } catch (error) {
-    const usage = error instanceof ModelError ? error.usage : NO_USAGE;
+    const usage = error instanceof ModelError ? error.usage : ZERO_USAGE;
     const reason = error instanceof Error ? error.message : String(error);
 
     return {

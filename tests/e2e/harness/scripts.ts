@@ -27,8 +27,10 @@ import type { Script } from "../../../src/model/scripted.js";
 export const SCRIPTED_USAGE = {
   inputTokens: 1_000,
   outputTokens: 100,
-  cacheWriteTokens: 0,
-  cacheReadTokens: 0,
+  // Non-zero, so the e2e layer exercises the path a real review takes: the constitution is a cached
+  // prefix, and every scenario that asserts on spend would otherwise only ever see a cold call.
+  cacheWriteTokens: 200,
+  cacheReadTokens: 800,
 } as const;
 
 export interface FindingOptions {
