@@ -691,7 +691,7 @@ describe("the daemon's heartbeat (Principle VII)", () => {
 
   it("omits an unchanged skip list on the next tick, and keeps the counts", async () => {
     capture();
-    // Two ticks over the same steady set. The counts prove the loop is alive on both; repeating
+    // Three tick bodies over the same steady set; the first two are what this asserts. The counts prove the loop is alive on both; repeating
     // the identical list into the record stream every tick is disk spent on nothing (Principle IV).
     const adapters = await adaptersListing(
       { pullRequests: [{ number: 31, headSha: "e".repeat(40) }], etag: 'W/"steady"' },
@@ -790,7 +790,7 @@ describe("the daemon's heartbeat (Principle VII)", () => {
     capture();
     // A `304` learned nothing about what is being skipped. Recording an empty signature would both
     // claim `skipped: []` falsely and reset suppression, making the next changed tick look
-    // identical to the one before it.
+    // identical to the one before it. Five tick bodies run; the first three are what this asserts.
     const steady = { pullRequests: [{ number: 51, headSha: "c".repeat(40) }], etag: 'W/"s"' };
     const responses = [steady, { pullRequests: null, etag: 'W/"s"' }, steady];
     let index = 0;
