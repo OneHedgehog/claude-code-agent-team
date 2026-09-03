@@ -457,33 +457,19 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
       },
     });
 
-    // The heartbeat (Principle VII).
+    // The heartbeat (Principle VII). Why it exists, why the list is suppressed when unchanged, and
+    // why a `304` is treated differently are all in docs/independent-review-service.md; repeating
+    // the argument here would give it a second home to drift from.
     //
-    // Every branch below this point is conditional -- a tick that selects nothing logs nothing --
-    // so a daemon idling correctly and a daemon that has died produce byte-identical output:
-    // none. That is not a theoretical complaint. This process ran for twenty-four minutes and
-    // then exited, and the only way to tell the difference at any point was `ps`.
-    //
-    // One line per tick, at `info`, costs nothing against FR-040 -- a `304` is free and this is
-    // not even a request -- and turns silence back into a signal.
-    // The list is written only when it changes. A repository with a steady set of open pull
-    // requests would otherwise multiply that set into the record stream on every tick, forever,
-    // and the JSONL cache is disk -- a metered resource under Principle IV. The counts still go out
-    // every tick, because their whole purpose is to prove the loop is alive; it is the unchanging
-    // detail behind them that carries no information the previous tick did not.
-    // Sorted once, then both compared and written in that order. Deciding on a sorted copy while
-    // recording the listing's order would let two records describing the identical set differ, and
-    // the record is the only witness there is.
+    // Sorted once, so the same order is both compared and written: deciding on a sorted copy while
+    // recording the listing's order would let two records of an identical set disagree.
     const skipped = tick.considered
       .filter((selection) => !selection.select)
       .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }))
       .sort((left, right) => left.pullRequest - right.pullRequest);
     const signature = JSON.stringify(skipped);
 
-    // A `304` examined no listing, so it learned nothing about what is being skipped -- the same
-    // pull requests are still open and still being passed over. Letting it record an empty
-    // signature would both claim `skipped: []` when that is false and reset the suppression, so
-    // the next changed tick would look identical to the one before it. An unchanged listing leaves
+    // A `304` examined no listing, so it records no skip list and leaves
     // the remembered set exactly as it was.
     const skippedChanged = !tick.unchanged && signature !== lastSkipped;
     if (!tick.unchanged) lastSkipped = signature;
