@@ -202,8 +202,9 @@ write a cache nothing ever reads.
 
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
 prefix that has fallen out of cache costs full price to write again. The extended TTL is a versioned
-API capability, not a free parameter: `ttl: "1h"` is accepted by the pinned SDK and API surface and
-would be rejected or ignored by one that predates extended cache TTLs. A live run reported `cacheWrite` and
+API capability, not a free parameter: `ttl: "1h"` is accepted by `@anthropic-ai/sdk` `^0.117.1` against
+the `2023-06-01` API version, and would be rejected or ignored by a surface that predates
+extended cache TTLs — so the pin in `package.json` is load-bearing, not incidental. A live run reported `cacheWrite` and
 `cacheRead` of 15,427 tokens each, the second role reading back exactly the prefix the first wrote,
 so the request shape is accepted rather than rejected.
 
