@@ -126,8 +126,18 @@ optional; a feature touching several subsystems would need it.
 
 `npm run check` — build, lint, format, typecheck, diagram, unit and integration suites — plus
 `tests/e2e/agent-transport.e2e.ts`, which drives this transport end to end against the real fixture
-repository with only the SDK's `query` scripted, and real
-reviews driven through the subscription against this repository's own pull request #9. Two rounds so
-far: round 1 against `ad40205` raised nine findings including the tool-guard defect, and round 2
-against `4b9e086` cleared all seven inline findings and approved on the implementation role. Both
-ran with no API credential resolvable, which is SC-002 exercised rather than asserted.
+repository with only the SDK's `query` scripted.
+
+Beyond the suite, this feature was reviewed by the service it belongs to, through the transport it
+adds, with no API credential resolvable on the host — which is SC-002 exercised rather than
+asserted. Each round found something the round before had asserted rather than checked:
+
+| round | revision | what it caught |
+|---|---|---|
+| 1 | `ad40205` | `allowedTools: []` is an auto-approval list, not an absence; `cwd` unset; `maxTokens` silently dropped |
+| 2 | `4b9e086` | The subprocess inherited `process.env` whole, exhausted API key included |
+| 3 | `201ea13` | The usage guard was walked through by a `usage` key set to `undefined`; no e2e test; no time bound |
+
+The pattern is worth naming, because it is the argument for the e2e scenario: every one of those was
+a claim about someone else's contract, held by a unit test the same author wrote, which could only
+ever confirm the claim to itself.
