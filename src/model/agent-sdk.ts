@@ -365,6 +365,22 @@ export class AgentSdkModelClient implements ModelClient {
       rmSync(scratch, { recursive: true, force: true });
     }
 
+    if (resultSubtype !== null && resultSubtype !== "success") {
+      // Checked *before* metering, because an errored or interrupted turn is a strictly more
+      // specific cause than an unmetered one, and the metering guard below still catches every
+      // stream that completed normally without usage.
+      //
+      // The ordering is the whole point. `canUseTool`'s `interrupt: true` ends the turn abruptly,
+      // and nothing establishes that the harness emits a populated `usage` on an interrupted
+      // result -- so with the guards the other way round, the most security-relevant event this
+      // transport can produce (a reviewed diff talking a tool-less reviewer into reaching for a
+      // tool) surfaced as a metering failure (Principle VII).
+      throw new ModelError(
+        `the harness ended the turn early (${resultSubtype})`,
+        usage ?? ZERO_USAGE,
+      );
+    }
+
     if (usage === null || usage.inputTokens + usage.outputTokens === 0) {
       // Fail rather than record zero, and on both shapes of the same failure.
       //
@@ -376,17 +392,6 @@ export class AgentSdkModelClient implements ModelClient {
       // here; it only ever means "not counted" (FR-062, FR-031).
       throw new ModelError(
         "harness reported no usage; the review cannot be metered",
-        usage ?? ZERO_USAGE,
-      );
-    }
-
-    if (resultSubtype !== null && resultSubtype !== "success") {
-      // Fails closed either way -- the accumulated text would not satisfy the schema -- but it
-      // fails saying what happened. The sharpest case is `canUseTool`'s interruption: a refused
-      // tool is the most security-relevant event this transport can produce, and it would
-      // otherwise reach the caller as an ordinary schema violation (Principle VII).
-      throw new ModelError(
-        `the harness ended the turn early (${resultSubtype})`,
         usage ?? ZERO_USAGE,
       );
     }

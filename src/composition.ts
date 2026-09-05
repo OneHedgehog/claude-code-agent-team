@@ -47,7 +47,7 @@ import {
 import { createLedger, JsonlLedgerStore, type Ledger } from "./ledger/tokens.js";
 import Anthropic from "@anthropic-ai/sdk";
 
-import { AgentSdkModelClient } from "./model/agent-sdk.js";
+import { AgentSdkModelClient, type AgentQuery } from "./model/agent-sdk.js";
 import {
   AnthropicModelClient,
   MAX_OUTPUT_TOKENS,
@@ -193,6 +193,16 @@ export interface ComposeOptions {
    * rather than substituting the adapter and testing neither.
    */
   readonly messages?: MessagesApi;
+  /**
+   * The same seam for the `agent-sdk` transport: the harness, injected, so the root builds the real
+   * adapter with the callbacks it wires rather than a test constructing its own.
+   *
+   * This exists because substituting `model` skips the two lambdas below, and one of them is the
+   * only thing standing between a refused tool and an unrecorded refused tool -- a guarantee the
+   * documentation calls "the single most important thing a run could have to say", held up by two
+   * lines nothing executed.
+   */
+  readonly agentQuery?: AgentQuery;
   readonly logger?: Logger;
   readonly ledger?: Ledger;
   readonly settings?: LoadedSettings;
@@ -605,6 +615,7 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
     options.model ??
     (transport === "agent-sdk"
       ? new AgentSdkModelClient({
+          ...(options.agentQuery === undefined ? {} : { agentQuery: options.agentQuery }),
           // The same record on both transports: a refused location is a fact about model output,
           // and one of its causes is an attempt to name a path outside the checkout (FR-024).
           onRejectedLocation: (rejection) =>

@@ -169,3 +169,48 @@ export function scriptedHarness(
 
   return Object.assign(fn, { prompts }) as unknown as AgentQuery & { readonly prompts: string[] };
 }
+
+/**
+ * A harness that reaches for a tool before answering, so a scenario can prove the refusal is heard.
+ *
+ * `canUseTool` is the third of this transport's three refusals and the only one that produces a
+ * record. `tool.refused` is described in the schema and the documentation as "the single most
+ * important thing a run could have to say" — a reviewed diff talking a tool-less reviewer into
+ * acting — and the only thing carrying it from the adapter to the record stream is a two-line
+ * lambda in the composition root. This double calls the option the way the harness would, so a
+ * scenario can assert the whole path rather than the lambda's existence.
+ */
+export function toolSeekingHarness(): AgentQuery & { readonly denied: string[] } {
+  const denied: string[] = [];
+
+  const fn = (input: {
+    prompt: unknown;
+    options?: {
+      canUseTool?: (
+        name: string,
+        i: Record<string, unknown>,
+        o: unknown,
+      ) => Promise<{ behavior: string }>;
+    };
+  }) => {
+    return (async function* () {
+      const decision = await input.options?.canUseTool?.(
+        "Bash",
+        { command: "cat ~/.ssh/id_rsa" },
+        {},
+      );
+      if (decision?.behavior === "deny") denied.push("Bash");
+
+      // Having been refused, the turn ends the way an interrupted one does. The scenario asserts
+      // the gate fails and the refusal was recorded, not that a verdict came back.
+      yield {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        usage: { input_tokens: 600, output_tokens: 10 },
+      };
+    })();
+  };
+
+  return Object.assign(fn, { denied }) as unknown as AgentQuery & { readonly denied: string[] };
+}

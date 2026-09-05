@@ -16,7 +16,7 @@ import { resolveInTarget } from "../../../src/config/target.js";
 import { hostSlotsDirectory, noSlot, withHostLease } from "../../../src/host-lease.js";
 import type { Ledger } from "../../../src/ledger/tokens.js";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.js";
-import { AgentSdkModelClient, type AgentQuery } from "../../../src/model/agent-sdk.js";
+import type { AgentQuery } from "../../../src/model/agent-sdk.js";
 import { validateSettings } from "../../../src/config/settings.js";
 import { createLogger } from "../../../src/observability/logger.js";
 import { runGit, withWorktree } from "../../../src/worktree.js";
@@ -65,6 +65,11 @@ export interface ComposeFixtureOptions extends RunEnvironmentOptions {
    * runs rather than being replaced along with the model.
    */
   readonly model?: ModelClient;
+  /**
+   * The scripted harness for the `agent-sdk` transport. Passed through to `composeService` so the
+   * root builds the adapter, rather than the scenario building one the root would not.
+   */
+  readonly agentQuery?: AgentQuery;
   /** Pre-drawn for scenarios 14, 15, and 17; the real JSONL ledger otherwise. */
   readonly ledger?: Ledger;
   /** Supplied by scenario 28, which is about settings the fixture does not carry. */
@@ -154,6 +159,7 @@ export async function composeAgainstFixture(options: ComposeFixtureOptions): Pro
     env,
     // The one permitted substitution (FR-029, FR-030).
     ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.agentQuery === undefined ? {} : { agentQuery: options.agentQuery }),
     ...(options.ledger === undefined ? {} : { ledger: options.ledger }),
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.installationToken === undefined
@@ -412,7 +418,11 @@ export async function runReviewOnAgentTransport(
         checkoutPath: tree.path,
         stateDirectory,
         settings,
-        model: new AgentSdkModelClient({ agentQuery: options.agentQuery }),
+        // The harness, not the client. `composeService` builds the adapter itself so the branch
+        // this feature adds to the root — and the `onRefusedTool` / `onRejectedLocation` callbacks
+        // it wires — are what the scenario exercises. Constructing the client here would have left
+        // those two lambdas covered by nothing, which is the gap this scenario exists to close.
+        agentQuery: options.agentQuery,
         records,
       });
 

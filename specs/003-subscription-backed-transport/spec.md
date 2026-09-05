@@ -57,15 +57,21 @@ rather than in `docs/`, which is rewritten whenever operations change.
 - **FR-062**: A review the harness did not meter MUST fail rather than record zero. An unmetered
   review cannot be reconciled against the budget check that permitted it, and Principle IV would
   rather stop than under-count (FR-031).
-- **FR-063**: `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` MUST NOT reach the harness
+- **FR-063**: `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` MUST NOT be **usable** by the harness
   subprocess. This transport exists because the credits behind that key ran out; on a host still
   configured for `api` — the default — the key is present in the orchestrator's environment.
-  Inherited, it could meter every subscription-funded review against the exhausted balance, fail,
-  and rebuild the deadlock this feature ends, while the run's record claimed
-  `modelTransport: "agent-sdk"`. The requirement is stated as an absence rather than as a
-  precedence rule deliberately: *which* credential the harness would prefer is a claim about
-  someone else's contract that would need re-checking on every upgrade, and a key that is not
-  present cannot win.
+  Reaching the child, it could meter every subscription-funded review against the exhausted
+  balance, fail, and rebuild the deadlock this feature ends, while the run's record claimed
+  `modelTransport: "agent-sdk"`.
+
+  The requirement is *usability*, not absence, and the distinction is load-bearing. Both names are
+  passed to the child **present and empty**, rather than omitted, so the neutralisation holds
+  whether the SDK replaces the child's environment or merges over `process.env`. Measurement says
+  it replaces, which would make omission sufficient today; an empty value is what makes the
+  guarantee survive that measurement becoming false. It is stated this way rather than as a
+  precedence rule for the same reason: *which* credential the harness would prefer is a claim about
+  someone else's contract needing re-checking on every upgrade, and a key that cannot authenticate
+  need not be ranked.
 - **FR-064**: A refused tool (`tool.refused`) is **recorded and not notified**. It is a detected
   injection attempt against the gate, and it fails closed: the tool is denied and the turn
   interrupted, so the review completes under the same constraints as any other. It is logged at
@@ -152,5 +158,6 @@ flip specifically.
   a test fails if any of the three refusals is removed.
 - **SC-007**: A harness stream that reports no usage fails the review rather than recording it at
   zero tokens.
-- **SC-008**: The harness subprocess receives an allowlisted environment, and a test fails if
-  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` reaches it.
+- **SC-008**: The harness subprocess receives an allowlisted environment in which
+  `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are present and empty, and a test fails if either
+  carries a value or is dropped from the set.

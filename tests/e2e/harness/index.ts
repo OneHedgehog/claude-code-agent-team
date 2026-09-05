@@ -72,5 +72,6 @@ export {
   script,
   scriptedHarness,
   SCRIPTED_USAGE,
+  toolSeekingHarness,
   type FindingOptions,
 } from "./scripts.js";

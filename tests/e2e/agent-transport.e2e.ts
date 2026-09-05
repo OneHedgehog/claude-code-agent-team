@@ -8,6 +8,7 @@ import {
   response,
   runReviewOnAgentTransport,
   scriptedHarness,
+  toolSeekingHarness,
   type FixtureClient,
   type FixturePullRequest,
 } from "./harness/index.js";
@@ -125,5 +126,28 @@ describe("the subscription-backed transport, driven end to end", () => {
     // figure, because what matters is that the cached half was counted at all — the defect this
     // guards against recorded a real review as free.
     expect(concluded?.usage.tokensConsumed).toBeGreaterThanOrEqual((800 + 4_000 + 90) * 2);
+  });
+
+  it("records a refused tool through the composed system, not just at the adapter", async () => {
+    // The refusal path end to end. The unit tests assert the option's value and that the callback
+    // fires when invoked; nothing asserted that a refusal survives the two-line lambda in the
+    // composition root and reaches the record stream — which is the guarantee `tool.refused` is
+    // documented as carrying, and the same class of nominal assurance the `allowedTools` finding
+    // was about, one layer up.
+    const pullRequest = await openPullRequest("agent-transport-refusal");
+    const harness = toolSeekingHarness();
+
+    const run = await runReviewOnAgentTransport({ client, pullRequest, agentQuery: harness });
+
+    // The harness asked, and was told no — once per role, since both reach the model.
+    expect(harness.denied).toEqual(["Bash", "Bash"]);
+
+    // And the run said so. This is the assertion that fails if the root stops wiring the callback.
+    const refusals = run.records.filter((r) => (r as { event: string }).event === "tool.refused");
+    expect(refusals).toHaveLength(2);
+    expect(refusals[0]).toMatchObject({ tool: { name: "Bash" } });
+
+    // Fails closed, as an interrupted turn rather than as a malformed response.
+    expect(run.outcome.gate.conclusion).toBe("failure");
   });
 });
