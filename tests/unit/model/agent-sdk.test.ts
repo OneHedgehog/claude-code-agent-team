@@ -129,6 +129,9 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
     expect(messages.calls[0]?.options["env"]).toEqual({
       PATH: "/usr/bin",
       HOME: "/Users/reviewer",
+      // Present and empty rather than absent -- see the next test.
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
     });
   });
 
@@ -144,15 +147,21 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
     const scoped = scopedEnvironment({
       PATH: "/usr/bin",
       HOME: "/Users/reviewer",
+      USER: "reviewer",
       ANTHROPIC_API_KEY: "sk-exhausted",
       ANTHROPIC_AUTH_TOKEN: "also-exhausted",
     });
 
-    expect(scoped).not.toHaveProperty("ANTHROPIC_API_KEY");
-    expect(scoped).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
-    // And the subscription's own home still reaches it, or the transport would authenticate with
-    // nothing at all.
+    // Present and empty, not absent. Measured behaviour is that the SDK *replaces* the child's
+    // environment rather than merging it over `process.env`, which would make omission enough --
+    // but omission is only enough under that reading, and this transport has already shipped two
+    // defects of exactly that shape. An empty value neutralises the credential either way.
+    expect(scoped["ANTHROPIC_API_KEY"]).toBe("");
+    expect(scoped["ANTHROPIC_AUTH_TOKEN"]).toBe("");
+    // And the two the harness genuinely needs still reach it. `USER` is not cosmetic: without it
+    // the harness does not reach the subscription at all and falls back to a metered path.
     expect(scoped["HOME"]).toBe("/Users/reviewer");
+    expect(scoped["USER"]).toBe("reviewer");
   });
 
   it("inherits no settings, so the same revision reviews the same on any machine", async () => {
@@ -287,6 +296,26 @@ describe("the response is consumed through the schema, exactly as on the API tra
     await expect(
       new AgentSdkModelClient({ agentQuery: unauthenticated }).review(request()),
     ).rejects.toThrow(HARNESS_NOT_AUTHENTICATED);
+  });
+
+  it("refuses to record a review whose usage arrived in a shape it does not recognise", async () => {
+    // The null guard alone checked that a usage-bearing message *arrived*, not that anything was
+    // counted. A renamed field in a later SDK release maps to `0` through `count()`, which is not
+    // `null`, so a real review that spent real tokens reached the ledger as free. A completed
+    // review costs tokens by construction, so zero here only ever means "not counted".
+    const renamed = Object.assign(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/require-await
+        (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: WELL_FORMED }] } };
+          yield { type: "result", usage: { inputTokenCount: 900, outputTokenCount: 40 } };
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: renamed }).review(request()),
+    ).rejects.toThrow(/cannot be metered/);
   });
 
   it("refuses to record a review the harness never metered", async () => {

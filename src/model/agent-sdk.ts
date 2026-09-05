@@ -115,32 +115,53 @@ function jsonOnlyInstruction(): string {
  * updated every time a new secret enters the orchestrator's environment, and the failure mode of
  * forgetting is silent. Nothing reaches the child unless it is named here.
  *
- * What is deliberately absent is more interesting than what is present. `ANTHROPIC_API_KEY` and
- * `ANTHROPIC_AUTH_TOKEN` are the two that matter: this transport exists *because* the metered
- * credits behind that key ran out, and on a host still configured for `api` -- the default -- that
- * key is sitting in `process.env`. Inherited, the harness might well authenticate with it, which
- * would meter every "subscription-funded" review against the exhausted balance, fail, and rebuild
- * the exact deadlock this transport was written to end -- while the run's own record claimed
- * `modelTransport: "agent-sdk"`. Rather than answer "which credential wins?", which is a claim
- * about someone else's contract and would need re-checking on every SDK upgrade, the key is not
- * there to win with (FR-058, FR-063).
+ * What is absent matters more than what is present. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`
+ * are the two that count: this transport exists *because* the metered credits behind that key ran
+ * out, and on a host still configured for `api` -- the default -- the key is sitting in
+ * `process.env`. Inherited, the harness might authenticate with it, metering every
+ * "subscription-funded" review against the exhausted balance while the run's own record claimed
+ * `modelTransport: "agent-sdk"` (FR-063).
  *
- * Also absent: `GITHUB_APP_CONFIG_DIR`, `GITHUB_MCP_PAT` and every other platform secret. The
- * reviewer reads a diff and returns JSON; it has no use for a credential of any kind, and
- * Principle V asks for containment that is structural rather than trusted.
+ * `USER` is here for a reason that is not obvious and was found by experiment, not by reading:
+ * **without it the harness does not reach the subscription at all** and falls back to a metered
+ * path. `{ PATH, HOME }` answers `Credit balance is too low`; `{ PATH, HOME, USER }` answers
+ * normally. Removing it looks cosmetic and is not -- see `specs/003` plan, "What the harness
+ * actually needs".
  */
 const INHERITED_ENVIRONMENT = [
   // Finding the runtime at all.
   "PATH",
-  // Where the harness reads its own subscription credential from. This is the one that funds it.
+  // Where the harness reads its own subscription credential from.
   "HOME",
+  // Load-bearing for subscription authentication. Not cosmetic; see above.
+  "USER",
+  // Honoured when an operator has relocated the harness's configuration.
   "CLAUDE_CONFIG_DIR",
-  // Scratch space, encoding, and the terminal-shape variables a spawned CLI expects to exist.
+  // Scratch space and encoding.
   "TMPDIR",
   "LANG",
   "LC_ALL",
-  "USER",
 ] as const;
+
+/**
+ * Passed as empty rather than omitted, so the neutralisation survives either reading of the SDK.
+ *
+ * Measured behaviour is that `env` **replaces** the child's environment rather than merging it over
+ * `process.env` -- a bogus `ANTHROPIC_BASE_URL` planted in the parent does not reach the child when
+ * `env` is set, and does when it is not. Omission would therefore be sufficient today.
+ *
+ * They are named anyway, because "sufficient today" is the shape of defect this transport has
+ * already shipped twice: `allowedTools: []` meant something weaker than it read as, and the
+ * environment was inherited whole for a whole revision. Under a merging SDK -- a plausible future,
+ * and the more common shape for an `env` option layered over `spawn` -- omission silently stops
+ * working and nothing fails. An empty value neutralises the credential under both readings.
+ *
+ * Verified not to shadow the subscription: with `USER` present, a harness given
+ * `ANTHROPIC_API_KEY: ""` still authenticates and answers. That is *not* true of the Anthropic SDK,
+ * where an empty key authenticates as an empty key instead of falling through to the profile
+ * (CLAUDE.md), which is why it was checked rather than assumed.
+ */
+const NEUTRALISED_CREDENTIALS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const;
 
 /** The child's environment: the allowlist above, and nothing else that happens to be set. */
 export function scopedEnvironment(
@@ -152,6 +173,8 @@ export function scopedEnvironment(
     const value = source[name];
     if (value !== undefined) scoped[name] = value;
   }
+
+  for (const name of NEUTRALISED_CREDENTIALS) scoped[name] = "";
 
   return scoped;
 }
@@ -294,10 +317,19 @@ export class AgentSdkModelClient implements ModelClient {
       rmSync(scratch, { recursive: true, force: true });
     }
 
-    if (usage === null) {
-      // Fail rather than record zero. An unmetered review is one the budget check that authorised
-      // it cannot be reconciled against, and Principle IV would rather stop than under-count.
-      throw new ModelError("harness reported no usage; the review cannot be metered", ZERO_USAGE);
+    if (usage === null || usage.inputTokens + usage.outputTokens === 0) {
+      // Fail rather than record zero, and on both shapes of the same failure.
+      //
+      // `null` is the message never arriving. All-zero is the message arriving in a shape
+      // `readUsage` does not recognise -- a renamed field in a later SDK release, a different
+      // casing, a nested total -- which `count()` maps to `0` and which would otherwise pass the
+      // null guard and reach the ledger as a completed review that cost nothing. A review that
+      // produced an answer consumed tokens by construction, so zero is not a possible true value
+      // here; it only ever means "not counted" (FR-062, FR-031).
+      throw new ModelError(
+        "harness reported no usage; the review cannot be metered",
+        usage ?? ZERO_USAGE,
+      );
     }
 
     return {

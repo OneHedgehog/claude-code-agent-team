@@ -67,6 +67,26 @@ the waiver; it is recorded here rather than left implicit.
 accept the field and silently ignore it, FR-061 states the limitation: on this transport a review is
 bounded by one turn and by the budget check that authorised it, not by an output ceiling.
 
+## What the harness actually needs, measured
+
+Three claims about the SDK were load-bearing and unverified, so they were tested rather than read.
+Each experiment ran a one-turn query and observed the answer.
+
+| question | method | result |
+|---|---|---|
+| Does `env` **replace** the child's environment, or merge over `process.env`? | Planted a bogus `ANTHROPIC_BASE_URL` in the parent only | **Replaces.** With `env` set the child answered normally; with `env` omitted it failed to connect |
+| Which variables does subscription auth need? | Removed them one at a time | `PATH`, `HOME` **and `USER`**. `{PATH, HOME}` answers `Credit balance is too low` — it falls back to a metered path |
+| Does an empty `ANTHROPIC_API_KEY` shadow the subscription? | Passed `""` alongside a working set | **No.** It still authenticates. This is *not* true of the Anthropic SDK, where an empty key authenticates as an empty key (CLAUDE.md) |
+
+The `USER` result is the one worth carrying forward: it looks cosmetic, it is not, and removing it
+degrades the transport to the exhausted credits **silently** — the run still completes, and only the
+error text says what happened. FR-063 exists because that failure is invisible.
+
+Replacement being the measured behaviour would make omitting the API key sufficient. It is named
+with an empty value anyway, so the neutralisation holds under a merging SDK too. Twice on this
+feature a claim about someone else's contract has turned out weaker than it read, and an experiment
+recorded here is only true of the version it was run against.
+
 ## No task decomposition, and why
 
 The workflow is spec → plan → tasks → implement, and no `tasks.md` was produced. Review asked for
@@ -81,7 +101,9 @@ optional; a feature touching several subsystems would need it.
 
 ## Verification
 
-`npm run check` — build, lint, format, typecheck, diagram, unit and integration suites — plus real
+`npm run check` — build, lint, format, typecheck, diagram, unit and integration suites — plus
+`tests/e2e/agent-transport.e2e.ts`, which drives this transport end to end against the real fixture
+repository with only the SDK's `query` scripted, and real
 reviews driven through the subscription against this repository's own pull request #9. Two rounds so
 far: round 1 against `ad40205` raised nine findings including the tool-guard defect, and round 2
 against `4b9e086` cleared all seven inline findings and approved on the implementation role. Both
