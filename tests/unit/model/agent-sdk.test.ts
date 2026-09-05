@@ -57,14 +57,8 @@ function fakeQuery(text: string, usage?: Record<string, number>) {
 
 describe("the harness is asked for a review and nothing else (FR-036, Principle V)", () => {
   it("exposes no tools, using the option that actually withholds them", async () => {
-    // The diff is attacker-influenced data and this transport spawns a harness whose default
-    // posture is tool-bearing, so this is the whole of the guard on this path.
-    //
-    // `tools` is the option that means "no tools", and the distinction is not pedantry: the SDK
-    // documents `allowedTools` as "tool names that are auto-allowed without prompting for
-    // permission" and says outright "to restrict which tools are available, use the `tools` option
-    // instead". An earlier revision asserted only `allowedTools: []`, which left every tool defined
-    // and merely un-approved -- a permission prompt with nobody present to answer it.
+    // `tools` withholds; `allowedTools` only pre-approves. An earlier revision asserted the
+    // second alone, which left every tool defined and merely unapproved (FR-058).
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: messages }).review(request());
 
@@ -79,9 +73,7 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
   });
 
   it("refuses a tool at the moment of use, whatever the other two options turn out to mean", async () => {
-    // The belt-and-braces line. `tools: []` should make this unreachable; it exists because the
-    // other two assertions are claims about an external contract, and a guard over untrusted input
-    // must not rest on any one of them being read the way its documentation reads today.
+    // The refusal that does not depend on the SDK's option semantics (FR-058).
     const messages = fakeQuery(WELL_FORMED);
     const refused: string[] = [];
     await new AgentSdkModelClient({
@@ -100,9 +92,7 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
   });
 
   it("runs in an empty directory rather than the orchestrator's own tree", async () => {
-    // `cwd` defaults to `process.cwd()` -- the tree holding `.agents/settings.json`, the App
-    // configuration and every other checkout. If any refusal above were wrong, that was the
-    // fallback the harness would have been standing in.
+    // Not containment -- tidiness. `cwd` defaults to the orchestrator's own tree.
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: messages }).review(request());
 
@@ -112,10 +102,8 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
   });
 
   it("hands the harness an allowlisted environment, not the orchestrator's own", async () => {
-    // The environment was the last dimension still inherited whole, after tools, settings and cwd
-    // had each been narrowed. The SDK replaces the child's environment when `env` is set rather
-    // than merging it, so an allowlist is possible -- and an allowlist is what this must be: a
-    // deny-list needs updating every time a new secret enters the parent, and forgetting is silent.
+    // An allowlist, not a subtraction: a deny-list needs updating whenever a new secret enters
+    // the parent, and forgetting is silent (FR-063).
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({
       agentQuery: messages,
@@ -138,14 +126,8 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
   });
 
   it("withholds the exhausted API key specifically, so the transport cannot be metered to it", () => {
-    // The finding that produced this was not about hardening. This transport exists *because* the
-    // credits behind `ANTHROPIC_API_KEY` ran out, and on a host still configured for `api` -- the
-    // default -- that key is in `process.env`. Inherited, the harness might authenticate with it,
-    // meter every "subscription-funded" review against the exhausted balance, and rebuild the
-    // deadlock this transport was written to end, while the record claimed otherwise.
-    //
-    // Asserted rather than reasoned about: the key is not there to win with, so which credential
-    // the harness would have preferred never has to be answered (FR-063).
+    // Not hardening: this transport exists because the credits behind that key ran out, and on a
+    // host still configured for `api` the key is in `process.env` (FR-063).
     const scoped = scopedEnvironment({
       PATH: "/usr/bin",
       HOME: "/Users/reviewer",
@@ -188,9 +170,7 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
   });
 
   it("spends the configured effort, which the run reports as effective (FR-054)", async () => {
-    // Every run reports `modelEffort` in its effective settings. Before this assertion existed the
-    // agent transport ignored it, so a run configured `max` reported `max` and behaved like `low`
-    // -- a value nobody could see through, reported as though they could.
+    // Reported as effective on every run, so it must take effect (FR-060).
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: messages }).review(request({ effort: "max" }));
 
@@ -259,9 +239,8 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("raises ModelError carrying the spend when the harness fails part-way through", async () => {
-    // Typed the way every other fake here is typed. An earlier revision wrote `as never`, which
-    // erased the call signature entirely: a plain throwing function -- which never enters the async
-    // iteration, and so is not the path under test at all -- passed the test just as well.
+    // Typed as `AgentQuery`, not `as never`: that erased the signature, so a plain throwing
+    // function -- which never enters the iteration under test -- passed just as well.
     const failing = Object.assign(
       () =>
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -301,9 +280,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("refuses to record a review whose result carried a usage key with no value", async () => {
-    // `"usage" in message` is true for a key present with the value `undefined`, and
-    // `readUsage(undefined)` returns an all-zero total -- which is not `null`, and so walked
-    // straight through the FR-062 guard rather than around it.
+    // `in` is true for a key set to `undefined`, which reads as an all-zero total (FR-062).
     const empty = Object.assign(
       () =>
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -320,9 +297,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("names an early-ended turn rather than reporting it as a schema violation", async () => {
-    // The sharpest case is a refused tool: `canUseTool` interrupts the turn, so the most
-    // security-relevant event this transport can produce would otherwise reach the caller as an
-    // ordinary malformed response (Principle VII).
+    // A refused tool interrupts the turn, and would otherwise read as malformed JSON.
     const interrupted = Object.assign(
       () =>
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -344,9 +319,8 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("abandons a harness that does not answer, rather than holding the only review slot", async () => {
-    // `maxTurns` bounds the conversation and the budget bounds spend; neither bounds time. With
-    // `maxConcurrentReviews: 1`, one hung review holds the only slot forever: the check run stays
-    // in progress, no verdict is reported, and nothing escalates.
+    // Nothing else bounds time, and `maxConcurrentReviews: 1` means a hung review holds the only
+    // slot forever (FR-066).
     const hanging = Object.assign(
       (input: { options?: { abortController?: AbortController } }) =>
         // eslint-disable-next-line require-yield
@@ -365,10 +339,8 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("refuses to record a review whose usage arrived in a shape it does not recognise", async () => {
-    // The null guard alone checked that a usage-bearing message *arrived*, not that anything was
-    // counted. A renamed field in a later SDK release maps to `0` through `count()`, which is not
-    // `null`, so a real review that spent real tokens reached the ledger as free. A completed
-    // review costs tokens by construction, so zero here only ever means "not counted".
+    // A completed review costs tokens by construction, so zero only ever means "not counted"
+    // (FR-062).
     const renamed = Object.assign(
       () =>
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -385,9 +357,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("names a subscription limit rather than reporting a generic failure", async () => {
-    // Demonstrated rather than hypothetical: round 4 of this feature's own review produced no
-    // verdict because the harness answered "You've hit your session limit". The transport removes
-    // the metered-credit limit and introduces this one, and the two failures have the same shape.
+    // Demonstrated, not hypothetical: round 4 of this feature's own review hit one (FR-065).
     const limited = Object.assign(
       () =>
         // eslint-disable-next-line require-yield, @typescript-eslint/require-await
@@ -403,9 +373,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("names the metered fallback, which is the failure FR-063 exists to prevent", async () => {
-    // The one failure this transport is *for* was the only one arriving as a generic error. An
-    // insufficient environment makes the harness authenticate against the exhausted balance and
-    // answer `Credit balance is too low` — the feature's premise ceasing to hold, silently.
+    // The one failure this transport is *for* was the only one without a name (FR-063).
     const fellBack = Object.assign(
       () =>
         // eslint-disable-next-line require-yield, @typescript-eslint/require-await
@@ -421,9 +389,8 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("charges an abandoned review what its prompt certainly cost, not zero", async () => {
-    // On the deadline path no `result` message ever arrives, so `usage` is null by construction —
-    // meaning the most expensive failure this transport has would reach the ledger as free. An
-    // under-estimate in place of a zero: the prompt was sent, so its tokens were spent (FR-031).
+    // An aborted turn yields no `result`, so this failure would otherwise be recorded as free
+    // (FR-067).
     const hanging = Object.assign(
       (input: { options?: { abortController?: AbortController } }) =>
         // eslint-disable-next-line require-yield

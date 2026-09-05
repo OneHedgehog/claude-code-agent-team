@@ -93,30 +93,19 @@ export function script(
 }
 
 /**
- * A scripted Claude Code harness, for the `agent-sdk` transport's end-to-end scenario.
+ * A scripted Claude Code harness: the substitution one layer deeper than everywhere else
+ * here, so the real adapter runs and only the SDK's `query` is replaced.
  *
- * The substitution moves one layer deeper than everywhere else in this suite, and that is the
- * point. Every other scenario replaces `ModelClient` wholesale with `ScriptedModelClient`, which on
- * this transport would skip the adapter entirely — the prompt assembly, the JSON extraction, the
- * schema validation, the usage folding and the tool refusals would all be bypassed, and the e2e
- * layer would be asserting on a class the service never builds. Here the real
- * `AgentSdkModelClient` runs and only the SDK's `query` is scripted, so the flow under test is the
- * one production takes.
- *
- * The same response answers every role: the prompt carries the constitution, the pull request, the
- * diff and the prior findings, but no role marker, so a harness double has nothing to key on. A
- * scenario needing the roles to differ belongs on the `api` transport, where `Script` can.
+ * The same response answers every role — the prompt carries no role marker, so a harness double
+ * has nothing to key on. A scenario needing the roles to differ belongs on the `api` transport.
  */
 /**
- * A finding in the shape a model actually emits, rather than the shape the service uses internally.
+ * A finding in the shape a model emits, not the shape the service uses internally.
  *
- * `FindingLocation` is a discriminated union downstream, but the wire schema is flat and requires
- * all four fields — structured outputs rejects `oneOf`, so `pullRequestLevel` carries the
- * discriminant and `normalizeLocation` restores the union at the boundary. `anchoredFinding` builds
- * the internal shape, which every other scenario can use directly because `ScriptedModelClient`
- * returns a `ReviewResponse` and never crosses that boundary. This double does cross it, so it has
- * to speak the wire's language — and a response that did not would be rejected by the parser
- * exactly as a real malformed one is, which is how this was found.
+ * The wire schema is flat and requires `pullRequestLevel` (structured outputs rejects `oneOf`).
+ * `anchoredFinding` builds the internal union, which every other scenario passes straight through
+ * because `ScriptedModelClient` never crosses that boundary. This double does — and was rejected
+ * by the real parser exactly as a malformed model response would be, which is how this was found.
  */
 function onTheWire(finding: FindingDraft): Record<string, unknown> {
   const { location, ...rest } = finding;
@@ -171,14 +160,12 @@ export function scriptedHarness(
 }
 
 /**
- * A harness that reaches for a tool before answering, so a scenario can prove the refusal is heard.
+ * A harness that reaches for a tool before answering, so a scenario can prove the refusal is
+ * heard.
  *
- * `canUseTool` is the third of this transport's three refusals and the only one that produces a
- * record. `tool.refused` is described in the schema and the documentation as "the single most
- * important thing a run could have to say" — a reviewed diff talking a tool-less reviewer into
- * acting — and the only thing carrying it from the adapter to the record stream is a two-line
- * lambda in the composition root. This double calls the option the way the harness would, so a
- * scenario can assert the whole path rather than the lambda's existence.
+ * `canUseTool` is the only one of the three refusals that produces a record, and the only thing
+ * carrying it into the record stream is a two-line lambda in the composition root. This double
+ * calls the option the way the harness would, so a scenario asserts the path, not the lambda.
  */
 export function toolSeekingHarness(): AgentQuery & { readonly denied: string[] } {
   const denied: string[] = [];

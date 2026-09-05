@@ -371,15 +371,9 @@ export interface AgentTransportRun {
 /**
  * The same end-to-end flow as `runReview`, driven on the `agent-sdk` transport (Principle II).
  *
- * This exists because `runReview` cannot cover it. Substituting `ScriptedModelClient` replaces the
- * whole model boundary, so on the agent transport it would skip the adapter the service actually
- * builds — the prompt assembly, the tool refusals, the JSON extraction, the schema validation and
- * the usage folding would every one be bypassed, and the layer meant to catch integration defects
- * would be exercising a class production never constructs. Here the real `AgentSdkModelClient` runs
- * and only the SDK's `query` is scripted.
- *
- * Everything else is as real as any other scenario: the installation token, the worktree, the host
- * lease, the check-run writes, the branch-protection read.
+ * `runReview` cannot cover it: substituting `ScriptedModelClient` replaces the whole model boundary, so
+ * on this transport it would skip the adapter under test. Here the root builds the real client
+ * from an injected `agentQuery`, and everything else is as real as any other scenario.
  */
 export async function runReviewOnAgentTransport(
   options: AgentTransportRunOptions,
