@@ -187,11 +187,10 @@ with every run.
 **The reviewer reaches the model one of two ways, and `modelTransport` chooses.** The requirements,
 and the two constitutional waivers permitting the second one, are recorded in
 [specs/003-subscription-backed-transport](../specs/003-subscription-backed-transport/spec.md) —
-a proprietary dependency, and a substitution the operator approved after a metered resource ran out.
- `api` calls the
-Messages API with a credential this process resolves — metered against an organisation's API
-credits. `agent-sdk` runs Claude Code as a library, which authenticates itself and bills the
-operator's subscription.
+a proprietary dependency, and a substitution the operator approved after a metered resource ran
+out. `api` calls the Messages API with a credential this process resolves — metered against an
+organisation's API credits. `agent-sdk` runs Claude Code as a library, which authenticates itself
+and bills the operator's subscription.
 
 The second exists because the first has a failure mode that closes the repository. The gate has one
 producer; when its credits run out mid-session the reviewer stops, and because a concluded failing
@@ -213,6 +212,11 @@ so the injection guard (FR-036) and the response contract cannot drift apart. Th
 runs with no tools and no inherited settings: a reviewer that could read files or run commands would
 no longer be treating the diff as data, and one that inherited the operator's own instructions would
 review the same revision differently on two machines.
+
+`modelEffort` is spent on whichever transport is selected — `output_config.effort` on `api`, the
+harness's own `effort` option on `agent-sdk`. It is reported as an effective setting with every run,
+and a setting reported as effective while being silently inert would make that record an assurance
+rather than a disclosure (FR-060).
 
 **The model call is behind an interface** so end-to-end tests drive the entire flow with a scripted
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so

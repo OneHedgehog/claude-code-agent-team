@@ -119,6 +119,14 @@ export class AgentSdkModelClient implements ModelClient {
           model: this.#model,
           systemPrompt: prompt.systemPrompt,
           maxTurns: MAX_TURNS,
+          // The same depth/cost dial the API transport spends through `output_config.effort`, and
+          // it has to be passed here rather than assumed: `validateSettings` reports `modelEffort`
+          // as an effective setting on every run, and a value reported as effective while being
+          // silently inert is worse than one nobody can see at all (FR-054). Paired with adaptive
+          // thinking for the same reason it is on the other path -- effort guides thinking depth,
+          // so setting one without the other configures half a dial.
+          effort: request.effort,
+          thinking: { type: "adaptive" },
           // No tools at all. The reviewer reads a diff that arrived as data and must not act on
           // it -- not read a file, not run a command, not fetch a URL. An agent harness makes that
           // an explicit choice rather than a property of the transport (Principle V, FR-036).

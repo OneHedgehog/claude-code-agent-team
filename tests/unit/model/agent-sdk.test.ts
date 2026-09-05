@@ -79,6 +79,17 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
     expect(String(messages.calls[0]?.options["systemPrompt"])).toContain("DATA");
   });
 
+  it("spends the configured effort, which the run reports as effective (FR-054)", async () => {
+    // Every run reports `modelEffort` in its effective settings. Before this assertion existed the
+    // agent transport ignored it, so a run configured `max` reported `max` and behaved like `low`
+    // -- a value nobody could see through, reported as though they could.
+    const messages = fakeQuery(WELL_FORMED);
+    await new AgentSdkModelClient({ agentQuery: messages }).review(request({ effort: "max" }));
+
+    expect(messages.calls[0]?.options["effort"]).toBe("max");
+    expect(messages.calls[0]?.options["thinking"]).toEqual({ type: "adaptive" });
+  });
+
   it("reproduces the schema in the prompt, since this transport cannot constrain the reply", async () => {
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: messages }).review(request());

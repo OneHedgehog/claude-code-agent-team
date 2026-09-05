@@ -582,9 +582,15 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
   // an absent one, so a run that cannot reach the model still fails for a stated reason.
   const transport = settings.settings.modelTransport;
 
+  // Annotated rather than asserted. `as ModelCredential` would have silenced the compiler on the
+  // one value in this file that no resolver ever checked; an annotation keeps it checking, and it
+  // passes today because `apiKey` is genuinely nullable -- the `oauth-profile` source already
+  // carries no key.
+  const agentSdkCredential: ModelCredential = { source: "agent-sdk", apiKey: null };
+
   const modelCredential =
     transport === "agent-sdk"
-      ? ({ source: "agent-sdk", apiKey: null } as ModelCredential)
+      ? agentSdkCredential
       : resolveModelCredential({
           env,
           keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),

@@ -39,6 +39,11 @@ rather than in `docs/`, which is rewritten whenever operations change.
 - **FR-059**: A response that does not satisfy the schema MUST become a missing verdict and a failed
   gate on either transport (FR-007). The `agent-sdk` transport asks for the schema in the prompt
   rather than constraining generation, so validation is the only enforcement it has.
+- **FR-060**: An optional setting reported as effective MUST take effect on the selected transport.
+  `modelEffort` is reported with every run (FR-054) so that no behaviour depends on a value nobody
+  can see; a transport that reports a value it does not apply defeats that requirement more
+  thoroughly than not reporting it, because the record then reads as an assurance rather than a
+  gap.
 
 ## Waiver 1 — a dependency that is not permissively licensed
 
@@ -90,3 +95,5 @@ downgrade.
 - **SC-003**: A response that violates the schema fails the gate on both transports.
 - **SC-004**: The `agent-sdk` transport grants no tools and inherits no settings, and a test fails
   if either changes.
+- **SC-005**: A run configured `modelEffort: "max"` spends `max` on either transport, and a test
+  fails if a transport reports the value without applying it.
