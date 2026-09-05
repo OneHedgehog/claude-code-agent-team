@@ -59,7 +59,7 @@ const TARGET = createTarget({
  * file keeps the budgets and caps honest; pinning the transport keeps an operational choice from
  * silently changing what is under test.
  */
-const SETTINGS: LoadedSettings = (() => {
+function settingsFor(modelTransport: "api" | "agent-sdk"): LoadedSettings {
   const file = JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as Record<
     string,
     Record<string, unknown>
@@ -67,9 +67,11 @@ const SETTINGS: LoadedSettings = (() => {
 
   return validateSettings({
     ...file,
-    reviewService: { ...file["reviewService"], modelTransport: "api" },
+    reviewService: { ...file["reviewService"], modelTransport },
   });
-})();
+}
+
+const SETTINGS: LoadedSettings = settingsFor("api");
 
 const HEAD = "c0ffee".padEnd(40, "0");
 
@@ -633,18 +635,6 @@ describe("what the root wires to the real adapter (Principle II)", () => {
 });
 
 describe("both transports are composed, whichever one the repository operates on", () => {
-  /** The repository's own settings with the transport named explicitly, rather than read. */
-  function settingsFor(modelTransport: "api" | "agent-sdk"): LoadedSettings {
-    const file = JSON.parse(
-      readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8"),
-    ) as Record<string, Record<string, unknown>>;
-
-    return validateSettings({
-      ...file,
-      reviewService: { ...file["reviewService"], modelTransport },
-    });
-  }
-
   /**
    * Composes with no credential reachable anywhere, and reports what was built.
    *
@@ -698,9 +688,7 @@ describe("both transports are composed, whichever one the repository operates on
     // The credential check exists so an absent one costs zero tokens (FR-051). A transport that
     // needs no credential must not read as an absent one, or it would stop every run.
     const result = checkPrerequisites({
-      granted: Object.fromEntries(
-        Object.entries(REQUIRED_INSTALLATION_PERMISSIONS).map(([name, level]) => [name, level]),
-      ),
+      granted: { ...REQUIRED_INSTALLATION_PERMISSIONS },
       protection: { kind: "protected", requiredContexts: [MERGE_GATE_CHECK_NAME] },
       gateName: MERGE_GATE_CHECK_NAME,
       baseBranch: "main",

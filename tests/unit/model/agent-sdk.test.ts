@@ -4,6 +4,7 @@ import {
   AgentSdkModelClient,
   extractJson,
   HARNESS_NOT_AUTHENTICATED,
+  scopedEnvironment,
   type AgentQuery,
 } from "../../../src/model/agent-sdk.js";
 import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
@@ -106,6 +107,52 @@ describe("the harness is asked for a review and nothing else (FR-036, Principle 
     const cwd = String(messages.calls[0]?.options["cwd"]);
     expect(cwd).not.toBe(process.cwd());
     expect(cwd.startsWith(process.cwd())).toBe(false);
+  });
+
+  it("hands the harness an allowlisted environment, not the orchestrator's own", async () => {
+    // The environment was the last dimension still inherited whole, after tools, settings and cwd
+    // had each been narrowed. The SDK replaces the child's environment when `env` is set rather
+    // than merging it, so an allowlist is possible -- and an allowlist is what this must be: a
+    // deny-list needs updating every time a new secret enters the parent, and forgetting is silent.
+    const messages = fakeQuery(WELL_FORMED);
+    await new AgentSdkModelClient({
+      agentQuery: messages,
+      env: {
+        PATH: "/usr/bin",
+        HOME: "/Users/reviewer",
+        ANTHROPIC_API_KEY: "sk-exhausted",
+        GITHUB_MCP_PAT: "ghp-secret",
+        AWS_SECRET_ACCESS_KEY: "also-secret",
+      },
+    }).review(request());
+
+    expect(messages.calls[0]?.options["env"]).toEqual({
+      PATH: "/usr/bin",
+      HOME: "/Users/reviewer",
+    });
+  });
+
+  it("withholds the exhausted API key specifically, so the transport cannot be metered to it", () => {
+    // The finding that produced this was not about hardening. This transport exists *because* the
+    // credits behind `ANTHROPIC_API_KEY` ran out, and on a host still configured for `api` -- the
+    // default -- that key is in `process.env`. Inherited, the harness might authenticate with it,
+    // meter every "subscription-funded" review against the exhausted balance, and rebuild the
+    // deadlock this transport was written to end, while the record claimed otherwise.
+    //
+    // Asserted rather than reasoned about: the key is not there to win with, so which credential
+    // the harness would have preferred never has to be answered (FR-063).
+    const scoped = scopedEnvironment({
+      PATH: "/usr/bin",
+      HOME: "/Users/reviewer",
+      ANTHROPIC_API_KEY: "sk-exhausted",
+      ANTHROPIC_AUTH_TOKEN: "also-exhausted",
+    });
+
+    expect(scoped).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(scoped).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+    // And the subscription's own home still reaches it, or the transport would authenticate with
+    // nothing at all.
+    expect(scoped["HOME"]).toBe("/Users/reviewer");
   });
 
   it("inherits no settings, so the same revision reviews the same on any machine", async () => {

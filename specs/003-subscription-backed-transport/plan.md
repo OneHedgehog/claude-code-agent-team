@@ -67,8 +67,22 @@ the waiver; it is recorded here rather than left implicit.
 accept the field and silently ignore it, FR-061 states the limitation: on this transport a review is
 bounded by one turn and by the budget check that authorised it, not by an output ceiling.
 
+## No task decomposition, and why
+
+The workflow is spec → plan → tasks → implement, and no `tasks.md` was produced. Review asked for
+either the file or a statement of why not; this is the statement, because a retrospective
+decomposition invented after the work is fiction with a filename.
+
+Principle VIII wants each task's file and resource footprint recorded and the parallel-safe ones
+marked. This feature has one footprint: a single new adapter, the composition root that selects it,
+and their tests. There is nothing to run in parallel and nothing that contends — a decomposition
+would have one entry. That is why the stage was skipped, not an argument that the stage is
+optional; a feature touching several subsystems would need it.
+
 ## Verification
 
-`npm run check` — build, lint, format, typecheck, diagram, unit and integration suites — plus a real
-review driven through the subscription against this repository's own pull request #9, which produced
-findings, posted them, and reported the gate.
+`npm run check` — build, lint, format, typecheck, diagram, unit and integration suites — plus real
+reviews driven through the subscription against this repository's own pull request #9. Two rounds so
+far: round 1 against `ad40205` raised nine findings including the tool-guard defect, and round 2
+against `4b9e086` cleared all seven inline findings and approved on the implementation role. Both
+ran with no API credential resolvable, which is SC-002 exercised rather than asserted.

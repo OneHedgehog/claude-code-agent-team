@@ -87,6 +87,8 @@ export interface AgentSdkOptions {
    * reach for a tool, which is the single most important thing a run could have to say (FR-024).
    */
   readonly onRefusedTool?: (toolName: string) => void;
+  /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
+  readonly env?: Record<string, string | undefined>;
 }
 
 /**
@@ -104,6 +106,54 @@ function jsonOnlyInstruction(): string {
     "",
     JSON.stringify(REVIEW_RESPONSE_SCHEMA, null, 2),
   ].join("\n");
+}
+
+/**
+ * The only environment variables the harness subprocess is given.
+ *
+ * An allowlist, not a subtraction, and the distinction is the whole point: a deny-list has to be
+ * updated every time a new secret enters the orchestrator's environment, and the failure mode of
+ * forgetting is silent. Nothing reaches the child unless it is named here.
+ *
+ * What is deliberately absent is more interesting than what is present. `ANTHROPIC_API_KEY` and
+ * `ANTHROPIC_AUTH_TOKEN` are the two that matter: this transport exists *because* the metered
+ * credits behind that key ran out, and on a host still configured for `api` -- the default -- that
+ * key is sitting in `process.env`. Inherited, the harness might well authenticate with it, which
+ * would meter every "subscription-funded" review against the exhausted balance, fail, and rebuild
+ * the exact deadlock this transport was written to end -- while the run's own record claimed
+ * `modelTransport: "agent-sdk"`. Rather than answer "which credential wins?", which is a claim
+ * about someone else's contract and would need re-checking on every SDK upgrade, the key is not
+ * there to win with (FR-058, FR-063).
+ *
+ * Also absent: `GITHUB_APP_CONFIG_DIR`, `GITHUB_MCP_PAT` and every other platform secret. The
+ * reviewer reads a diff and returns JSON; it has no use for a credential of any kind, and
+ * Principle V asks for containment that is structural rather than trusted.
+ */
+const INHERITED_ENVIRONMENT = [
+  // Finding the runtime at all.
+  "PATH",
+  // Where the harness reads its own subscription credential from. This is the one that funds it.
+  "HOME",
+  "CLAUDE_CONFIG_DIR",
+  // Scratch space, encoding, and the terminal-shape variables a spawned CLI expects to exist.
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "USER",
+] as const;
+
+/** The child's environment: the allowlist above, and nothing else that happens to be set. */
+export function scopedEnvironment(
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const scoped: Record<string, string> = {};
+
+  for (const name of INHERITED_ENVIRONMENT) {
+    const value = source[name];
+    if (value !== undefined) scoped[name] = value;
+  }
+
+  return scoped;
 }
 
 function readUsage(raw: unknown): ModelUsage {
@@ -134,12 +184,14 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #model: string;
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
+  readonly #env: Record<string, string | undefined>;
 
   constructor(options: AgentSdkOptions = {}) {
     this.#query = options.agentQuery ?? query;
     this.#model = options.model ?? REVIEW_MODEL;
     this.#onRejectedLocation = options.onRejectedLocation;
     this.#onRefusedTool = options.onRefusedTool;
+    this.#env = options.env ?? process.env;
   }
 
   /**
@@ -208,6 +260,10 @@ export class AgentSdkModelClient implements ModelClient {
           // worst possible one. Nothing here needs a filesystem, so it gets an empty one
           // (Principle V's filesystem scope, Principle VIII's per-task checkout).
           cwd: scratch,
+          // And an environment holding only what the harness needs to start and to authenticate
+          // itself. The SDK replaces the subprocess environment entirely when this is set rather
+          // than merging it, which is what makes an allowlist possible here at all.
+          env: scopedEnvironment(this.#env),
           // No settings, no project instructions, no user memory. A review must depend on the diff
           // and the target's own constitution, not on whatever the operator's machine happens to
           // carry -- otherwise the same revision reviews differently on two hosts (Principle VII).

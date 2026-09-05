@@ -219,7 +219,18 @@ pre-approves, and an empty allowlist leaves every tool defined and merely unappr
 denies unconditionally and emits `tool.refused`, a record expected never to appear: if it does, a
 reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
 temporary directory rather than the orchestrator's own checkout, so the fallback if any of that were
-wrong is a directory holding nothing.
+wrong is a directory holding nothing. The child's environment is an allowlist — `PATH`, `HOME` and
+a handful of shape variables — rather than the orchestrator's own, which carries the GitHub App key,
+the installation token, and `ANTHROPIC_API_KEY`. That last one is not hardening: this transport
+exists because the credits behind that key ran out, and a harness that inherited and preferred it
+would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
+while the record claimed otherwise (FR-063).
+
+A refused tool is recorded and **not** notified (FR-064). It fails closed — the tool is denied and
+the turn interrupted — so the review completes under the same constraints as any other, and
+`tool.refused` sits at `warn` beside `location.rejected` rather than opening an escalation. An
+operator who wants a detected injection attempt to page someone should wire that record; it is
+written down here so the silence is a decision rather than an oversight.
 
 Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
 there is bounded by one turn and by the budget check that authorised it rather than by an output

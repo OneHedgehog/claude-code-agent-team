@@ -596,9 +596,11 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),
         });
 
-  // Constructed only when a credential exists. An absent one is not an error *here* — it is a
-  // startup prerequisite, reported with a reason and zero spend rather than as a 401 mid-review
-  // (FR-032, FR-051) — so the client is only built once there is something to build it from.
+  // On `api`, constructed only when a credential exists. An absent one is not an error *here* — it
+  // is a startup prerequisite, reported with a reason and zero spend rather than as a 401
+  // mid-review (FR-032, FR-051) — so that client is only built once there is something to build it
+  // from. `agent-sdk` has no such precondition, for the reason the block above gives: the harness
+  // authenticates itself, and this process holds nothing to check.
   const model =
     options.model ??
     (transport === "agent-sdk"

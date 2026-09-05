@@ -40,7 +40,8 @@ rather than in `docs/`, which is rewritten whenever operations change.
   than the one that pre-approves them (`allowedTools`), MUST be backed by a `canUseTool` that
   denies unconditionally and records the attempt, and MUST run in a directory that holds nothing —
   three independent refusals, because the first two are claims about an external contract and the
-  guard sits over untrusted input.
+  guard sits over untrusted input. The child's **environment** MUST be an allowlist rather than the
+  orchestrator's own, for the same reason the working directory is.
 - **FR-059**: A response that does not satisfy the schema MUST become a missing verdict and a failed
   gate on either transport (FR-007). The `agent-sdk` transport asks for the schema in the prompt
   rather than constraining generation, so validation is the only enforcement it has.
@@ -56,6 +57,21 @@ rather than in `docs/`, which is rewritten whenever operations change.
 - **FR-062**: A review the harness did not meter MUST fail rather than record zero. An unmetered
   review cannot be reconciled against the budget check that permitted it, and Principle IV would
   rather stop than under-count (FR-031).
+- **FR-063**: `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` MUST NOT reach the harness
+  subprocess. This transport exists because the credits behind that key ran out; on a host still
+  configured for `api` — the default — the key is present in the orchestrator's environment.
+  Inherited, it could meter every subscription-funded review against the exhausted balance, fail,
+  and rebuild the deadlock this feature ends, while the run's record claimed
+  `modelTransport: "agent-sdk"`. The requirement is stated as an absence rather than as a
+  precedence rule deliberately: *which* credential the harness would prefer is a claim about
+  someone else's contract that would need re-checking on every upgrade, and a key that is not
+  present cannot win.
+- **FR-064**: A refused tool (`tool.refused`) is **recorded and not notified**. It is a detected
+  injection attempt against the gate, and it fails closed: the tool is denied and the turn
+  interrupted, so the review completes under the same constraints as any other. It is logged at
+  `warn` alongside `location.rejected`, and it does **not** open an escalation. This is a
+  disclosure rather than an endorsement — an operator who wants injection attempts to page someone
+  should wire the record, and this requirement exists so the behaviour is not mistaken for one.
 
 ## Waiver 1 — a dependency that is not permissively licensed
 
@@ -136,3 +152,5 @@ flip specifically.
   a test fails if any of the three refusals is removed.
 - **SC-007**: A harness stream that reports no usage fails the review rather than recording it at
   zero tokens.
+- **SC-008**: The harness subprocess receives an allowlisted environment, and a test fails if
+  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` reaches it.
