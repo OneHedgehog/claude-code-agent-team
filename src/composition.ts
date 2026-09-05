@@ -596,7 +596,14 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
   const model =
     options.model ??
     (transport === "agent-sdk"
-      ? new AgentSdkModelClient()
+      ? new AgentSdkModelClient({
+          // The same record on both transports: a refused location is a fact about model output,
+          // and one of its causes is an attempt to name a path outside the checkout (FR-024).
+          onRejectedLocation: (rejection) =>
+            logger.warn("location.rejected", {
+              location: { path: rejection.path, reason: rejection.reason },
+            }),
+        })
       : modelCredential === null
         ? unavailableModel(MISSING_CREDENTIAL_REASON)
         : new AnthropicModelClient({

@@ -184,7 +184,11 @@ with every run.
 
 ## Decisions and trade-offs
 
-**The reviewer reaches the model one of two ways, and `modelTransport` chooses.** `api` calls the
+**The reviewer reaches the model one of two ways, and `modelTransport` chooses.** The requirements,
+and the two constitutional waivers permitting the second one, are recorded in
+[specs/003-subscription-backed-transport](../specs/003-subscription-backed-transport/spec.md) —
+a proprietary dependency, and a substitution the operator approved after a metered resource ran out.
+ `api` calls the
 Messages API with a credential this process resolves — metered against an organisation's API
 credits. `agent-sdk` runs Claude Code as a library, which authenticates itself and bills the
 operator's subscription.

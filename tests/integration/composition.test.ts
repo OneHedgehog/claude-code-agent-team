@@ -12,6 +12,8 @@ import {
   type ComposeOptions,
 } from "../../src/composition.js";
 import { createTarget } from "../../src/config/target.js";
+import { REQUIRED_INSTALLATION_PERMISSIONS } from "../../src/github/auth.js";
+import { checkPrerequisites } from "../../src/review/prerequisites.js";
 import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
@@ -626,5 +628,57 @@ describe("what the root wires to the real adapter (Principle II)", () => {
         .map((line) => JSON.parse(line) as { event: string })
         .filter((r) => r.event === "location.rejected"),
     ).toEqual([]);
+  });
+});
+
+describe("the transport the repository actually operates on is composed too", () => {
+  /** The repository's own settings, unpinned — whatever transport it is really configured for. */
+  function operatingSettings(): LoadedSettings {
+    return validateSettings(
+      JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as unknown,
+    );
+  }
+
+  it("builds a model for the configured transport without a credential in the environment", async () => {
+    // The prior revision pinned every composition test to `api` while switching this repository to
+    // `agent-sdk`, so the branch that actually runs here was covered by nothing. This test follows
+    // the settings file rather than a constant, and so cannot drift away from production again.
+    const { model: _substituted, ...withoutModel } = stubs(emptyCalls(), {
+      settings: operatingSettings(),
+    });
+
+    const adapters = await composeService({
+      ...withoutModel,
+      graphqlClient: noThreads(),
+      readKeychain: () => null,
+      env: { HOME: "/tmp/does-not-exist", ANTHROPIC_CONFIG_DIR: "/tmp/does-not-exist" },
+    });
+
+    if (operatingSettings().settings.modelTransport === "agent-sdk") {
+      // No credential is resolved on this path — the harness authenticates itself — so FR-051 must
+      // see a source rather than an absence, or every run would stop on a missing credential.
+      expect(adapters.modelCredential).toEqual({ source: "agent-sdk", apiKey: null });
+    } else {
+      expect(adapters.modelCredential).toBeNull();
+    }
+
+    expect(adapters.model).toBeDefined();
+  });
+
+  it("passes the prerequisite check on the agent transport, which holds no credential", () => {
+    // The credential check exists so an absent one costs zero tokens (FR-051). A transport that
+    // needs no credential must not read as an absent one, or it would stop every run.
+    const result = checkPrerequisites({
+      granted: Object.fromEntries(
+        Object.entries(REQUIRED_INSTALLATION_PERMISSIONS).map(([name, level]) => [name, level]),
+      ),
+      protection: { kind: "protected", requiredContexts: [MERGE_GATE_CHECK_NAME] },
+      gateName: MERGE_GATE_CHECK_NAME,
+      baseBranch: "main",
+      modelCredential: { source: "agent-sdk", apiKey: null },
+    });
+
+    expect(result.modelCredentialPresent).toBe(true);
+    expect(result.satisfied).toBe(true);
   });
 });

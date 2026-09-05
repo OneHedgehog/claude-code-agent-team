@@ -5,6 +5,7 @@ import {
   parseReviewResponse,
   REVIEW_MODEL,
   REVIEW_RESPONSE_SCHEMA,
+  type RejectedLocation,
 } from "./anthropic.js";
 import {
   ModelError,
@@ -45,6 +46,13 @@ export type AgentQuery = typeof query;
 export interface AgentSdkOptions {
   readonly agentQuery?: AgentQuery;
   readonly model?: string;
+  /**
+   * Told when a location the model produced was refused. Carried here for the same reason the API
+   * transport carries it: one cause of a refusal is model output naming a path outside the
+   * checkout, and a security boundary that refuses silently on one transport and audibly on the
+   * other is a boundary nobody can reason about (Principle VII).
+   */
+  readonly onRejectedLocation?: RejectedLocation;
 }
 
 /**
@@ -90,10 +98,12 @@ function readUsage(raw: unknown): ModelUsage {
 export class AgentSdkModelClient implements ModelClient {
   readonly #query: AgentQuery;
   readonly #model: string;
+  readonly #onRejectedLocation: RejectedLocation | undefined;
 
   constructor(options: AgentSdkOptions = {}) {
     this.#query = options.agentQuery ?? query;
     this.#model = options.model ?? REVIEW_MODEL;
+    this.#onRejectedLocation = options.onRejectedLocation;
   }
 
   async review(request: ReviewRequest): Promise<ReviewResponse> {
@@ -135,7 +145,10 @@ export class AgentSdkModelClient implements ModelClient {
       );
     }
 
-    return { ...parseReviewResponse(extractJson(text), usage), usage };
+    return {
+      ...parseReviewResponse(extractJson(text), usage, this.#onRejectedLocation),
+      usage,
+    };
   }
 }
 
