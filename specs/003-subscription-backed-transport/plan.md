@@ -130,13 +130,15 @@ repository with only the SDK's `query` scripted.
 
 Beyond the suite, this feature was reviewed by the service it belongs to, through the transport it
 adds, with no API credential resolvable on the host — which is SC-002 exercised rather than
-asserted. Each round found something the round before had asserted rather than checked:
+asserted. Each round is listed by the revision that **was reviewed**, not the one that answered it:
 
-| round | revision | what it caught |
+| round | revision reviewed | what it caught |
 |---|---|---|
-| 1 | `ad40205` | `allowedTools: []` is an auto-approval list, not an absence; `cwd` unset; `maxTokens` silently dropped |
-| 2 | `4b9e086` | The subprocess inherited `process.env` whole, exhausted API key included |
-| 3 | `201ea13` | The usage guard was walked through by a `usage` key set to `undefined`; no e2e test; no time bound |
+| 1 | `6281469` | No spec, no adapter tests, an unwaived proprietary dependency, and the settings flip landing unescalated |
+| 2 | `ad40205` | `allowedTools: []` is an auto-approval list, not an absence; `cwd` unset; `maxTokens` silently dropped |
+| 3 | `4b9e086` | The subprocess inherited `process.env` whole, exhausted API key included |
+| 4 | `4795a72` | The metering guard walked through by `usage: undefined`; no e2e test; no time bound |
+| 5 | `a5bc057` | FR-063 describing a mechanism the code had rejected; the e2e substituting the composed client; the guards in the wrong order |
 
 The pattern is worth naming, because it is the argument for the e2e scenario: every one of those was
 a claim about someone else's contract, held by a unit test the same author wrote, which could only
