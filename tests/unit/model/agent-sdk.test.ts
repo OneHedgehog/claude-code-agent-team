@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AgentSdkModelClient,
   extractJson,
+  HARNESS_LIMIT_REACHED,
   HARNESS_NOT_AUTHENTICATED,
   scopedEnvironment,
   type AgentQuery,
@@ -380,6 +381,24 @@ describe("the response is consumed through the schema, exactly as on the API tra
     await expect(
       new AgentSdkModelClient({ agentQuery: renamed }).review(request()),
     ).rejects.toThrow(/cannot be metered/);
+  });
+
+  it("names a subscription limit rather than reporting a generic failure", async () => {
+    // Demonstrated rather than hypothetical: round 4 of this feature's own review produced no
+    // verdict because the harness answered "You've hit your session limit". The transport removes
+    // the metered-credit limit and introduces this one, and the two failures have the same shape.
+    const limited = Object.assign(
+      () =>
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        (async function* () {
+          throw new Error("Claude Code returned an error result: You've hit your session limit");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: limited }).review(request()),
+    ).rejects.toThrow(HARNESS_LIMIT_REACHED);
   });
 
   it("refuses to record a review the harness never metered", async () => {

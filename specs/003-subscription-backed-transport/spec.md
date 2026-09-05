@@ -79,6 +79,28 @@ rather than in `docs/`, which is rewritten whenever operations change.
   disclosure rather than an endorsement — an operator who wants injection attempts to page someone
   should wire the record, and this requirement exists so the behaviour is not mistaken for one.
 
+## The subscription has its own exhaustion mode
+
+Not hypothetical: round 4 of this feature's own review produced no verdict from the implementation
+reviewer because the harness answered `You've hit your session limit · resets 10:10pm`.
+
+This matters because the feature's whole premise is that a metered balance running out closed the
+gate, and the subscription route removes that dependency. It removes *that* limit and introduces a
+different one. A session limit and an exhausted credit balance are different failures with the same
+shape: the reviewer cannot run, the run reports a missing verdict, and the gate fails closed.
+
+- **FR-065**: A harness refusal for a session or rate limit MUST fail closed as a missing verdict,
+  like any other model failure (FR-007), and MUST be legible as what it is rather than folded into a
+  generic call failure — the same obligation `HARNESS_NOT_AUTHENTICATED` discharges for an
+  unauthenticated host.
+- Principle IV's rule is unchanged and applies identically here: an agent MUST NOT resolve the
+  limit by spending or by weakening the gate. The system degrades to stopped.
+
+**What this does not do** is restore the property the API transport lost. Neither route is immune to
+its own funding running out; `agent-sdk` was adopted because one balance was already exhausted and
+another entitlement was already held, not because subscriptions cannot be exhausted. An operator
+choosing this transport should read it as moving the failure, not removing it.
+
 ## Waiver 1 — a dependency that is not permissively licensed
 
 The constitution requires that "every third-party dependency MUST be justified in the plan and MUST

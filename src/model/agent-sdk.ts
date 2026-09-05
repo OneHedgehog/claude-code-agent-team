@@ -77,10 +77,27 @@ const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
 export const HARNESS_NOT_AUTHENTICATED =
   "the review harness is not authenticated; run `claude` once on this host to sign in";
 
+/**
+ * Said in as many words when the subscription itself is out.
+ *
+ * The premise of this transport is that a metered balance running out closed the gate. It removes
+ * that limit and introduces another: a subscription has session and rate limits of its own, and
+ * this feature's own round 4 hit one. Named rather than folded into a generic failure for the same
+ * reason as an unauthenticated host — "the reviewer could not run" and "the reviewer ran and found
+ * nothing" must not look alike (FR-065, Principle VII).
+ */
+export const HARNESS_LIMIT_REACHED = "the review harness has reached a subscription limit";
+
+/** Whether a harness failure reads as the subscription's own limit rather than anything else. */
+function looksRateLimited(message: string): boolean {
+  return /\b(session limit|usage limit|rate limit|too many requests|429|quota)\b/i.test(message);
+}
+
 /** What to call a harness failure, most specific cause first. */
 function reasonFor(message: string, aborted: boolean, deadlineMs: number): string {
   if (aborted) return `the harness did not answer within ${Math.round(deadlineMs / 1000)}s`;
   if (looksUnauthenticated(message)) return `${HARNESS_NOT_AUTHENTICATED}: ${message}`;
+  if (looksRateLimited(message)) return `${HARNESS_LIMIT_REACHED}: ${message}`;
 
   return `model call failed: ${message}`;
 }

@@ -229,6 +229,12 @@ exists because the credits behind that key ran out, and a harness that inherited
 would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
 while the record claimed otherwise (FR-063).
 
+The subscription is not immune to running out either. A session or rate limit reads as
+`the review harness has reached a subscription limit`, fails closed as a missing verdict, and is
+subject to Principle IV exactly as an exhausted credit balance is — no spending, no weakened gate,
+the system degrades to stopped (FR-065). This transport moves the funding failure; it does not
+remove it, and round 4 of its own review demonstrated that rather than leaving it theoretical.
+
 A refused tool is recorded and **not** notified (FR-064). It fails closed — the tool is denied and
 the turn interrupted — so the review completes under the same constraints as any other, and
 `tool.refused` sits at `warn` beside `location.rejected` rather than opening an escalation. An
