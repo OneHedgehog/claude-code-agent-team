@@ -44,6 +44,23 @@ import {
 /** The single turn a review takes. There is no loop here: one question, one answer, no tools. */
 const MAX_TURNS = 1;
 
+/**
+ * How long a review may take before the harness is abandoned.
+ *
+ * `maxTurns` bounds the conversation and the budget check bounds spend; neither bounds *time*. A
+ * subprocess that hangs -- an unreachable endpoint, a wedged child, a stalled prompt -- would leave
+ * `review()` awaiting forever, and `maxConcurrentReviews: 1` means that one hung review holds the
+ * only slot indefinitely: the check run stays in progress, no verdict is reported, and nothing
+ * escalates. Principle VII is explicit that a system which stops without saying so is
+ * indistinguishable from one still working, and unlike the `api` path this transport inherits no
+ * timeout from the Anthropic SDK.
+ *
+ * Fifteen minutes because a real review of a large diff at `max` effort has taken minutes, and a
+ * deadline that fires on a slow-but-working review is worse than none -- it would convert a
+ * completed review into a missing verdict.
+ */
+const DEADLINE_MS = 15 * 60 * 1000;
+
 /** What a call that never reached a usable answer consumed, as far as this transport can tell. */
 const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
 
@@ -59,6 +76,14 @@ const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
  */
 export const HARNESS_NOT_AUTHENTICATED =
   "the review harness is not authenticated; run `claude` once on this host to sign in";
+
+/** What to call a harness failure, most specific cause first. */
+function reasonFor(message: string, aborted: boolean, deadlineMs: number): string {
+  if (aborted) return `the harness did not answer within ${Math.round(deadlineMs / 1000)}s`;
+  if (looksUnauthenticated(message)) return `${HARNESS_NOT_AUTHENTICATED}: ${message}`;
+
+  return `model call failed: ${message}`;
+}
 
 /** Whether a harness failure reads as an authentication problem rather than anything else. */
 function looksUnauthenticated(message: string): boolean {
@@ -89,6 +114,8 @@ export interface AgentSdkOptions {
   readonly onRefusedTool?: (toolName: string) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
   readonly env?: Record<string, string | undefined>;
+  /** How long the harness may take. Overridden by tests so a deadline case need not wait minutes. */
+  readonly deadlineMs?: number;
 }
 
 /**
@@ -208,6 +235,7 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
+  readonly #deadlineMs: number;
 
   constructor(options: AgentSdkOptions = {}) {
     this.#query = options.agentQuery ?? query;
@@ -215,6 +243,7 @@ export class AgentSdkModelClient implements ModelClient {
     this.#onRejectedLocation = options.onRejectedLocation;
     this.#onRefusedTool = options.onRefusedTool;
     this.#env = options.env ?? process.env;
+    this.#deadlineMs = options.deadlineMs ?? DEADLINE_MS;
   }
 
   /**
@@ -238,6 +267,15 @@ export class AgentSdkModelClient implements ModelClient {
     let usage: ModelUsage | null = null;
 
     const scratch = mkdtempSync(join(tmpdir(), "independent-review-"));
+
+    // Cancels the harness rather than merely abandoning the await: an orphaned subprocess would
+    // keep spending against the subscription with nothing left to read its answer.
+    const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
+
+    // Why the harness stopped, when it says. An errored or truncated run otherwise arrives as an
+    // ordinary schema failure, which is the diagnostic `HARNESS_NOT_AUTHENTICATED` exists to avoid.
+    let resultSubtype: string | null = null;
 
     try {
       for await (const message of this.#query({
@@ -277,6 +315,8 @@ export class AgentSdkModelClient implements ModelClient {
               interrupt: true,
             });
           },
+          // Bounded in time as well as in turns. See DEADLINE_MS.
+          abortController: abort,
           // An empty directory, not the orchestrator's. `cwd` defaults to `process.cwd()`, which
           // is the tree holding `.agents/settings.json`, the App configuration and every other
           // checkout -- so the fallback if any of the three refusals above were wrong was the
@@ -298,20 +338,28 @@ export class AgentSdkModelClient implements ModelClient {
             if (block.type === "text") text += block.text;
           }
         }
-        if (message.type === "result" && "usage" in message) {
-          usage = readUsage(message.usage);
+        if (message.type === "result") {
+          if ("subtype" in message && typeof message.subtype === "string") {
+            resultSubtype = message.subtype;
+          }
+          // `"usage" in message` alone was not enough: `in` is true for a key whose value is
+          // `undefined`, and `readUsage(undefined)` returns an all-zero total, which is not `null`
+          // and so walked straight through the FR-062 guard. Assigned only when there is something
+          // to read.
+          if ("usage" in message && message.usage !== undefined) {
+            usage = readUsage(message.usage);
+          }
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
       throw new ModelError(
-        looksUnauthenticated(message)
-          ? `${HARNESS_NOT_AUTHENTICATED}: ${message}`
-          : `model call failed: ${message}`,
+        reasonFor(message, abort.signal.aborted, this.#deadlineMs),
         usage ?? ZERO_USAGE,
       );
     } finally {
+      clearTimeout(deadline);
       // Best effort. An orphaned empty directory under the system temp root is a smaller problem
       // than a review that failed because its scratch space could not be removed.
       rmSync(scratch, { recursive: true, force: true });
@@ -332,6 +380,21 @@ export class AgentSdkModelClient implements ModelClient {
       );
     }
 
+    if (resultSubtype !== null && resultSubtype !== "success") {
+      // Fails closed either way -- the accumulated text would not satisfy the schema -- but it
+      // fails saying what happened. The sharpest case is `canUseTool`'s interruption: a refused
+      // tool is the most security-relevant event this transport can produce, and it would
+      // otherwise reach the caller as an ordinary schema violation (Principle VII).
+      throw new ModelError(
+        `the harness ended the turn early (${resultSubtype})`,
+        usage ?? ZERO_USAGE,
+      );
+    }
+
+    // The spread is not redundant, though it reads that way: `parseReviewResponse` returns
+    // `Omit<ReviewResponse, "usage">` and takes `usage` only to attach it to the `ModelError` it
+    // may throw. The parser never carries it through on the success path, so this is where the
+    // field comes from.
     return {
       ...parseReviewResponse(extractJson(text), usage, this.#onRejectedLocation),
       usage,

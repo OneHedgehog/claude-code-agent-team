@@ -163,7 +163,7 @@ export function scriptedHarness(
           ],
         },
       };
-      yield { type: "result", usage };
+      yield { type: "result", subtype: "success", usage };
     })();
   };
 

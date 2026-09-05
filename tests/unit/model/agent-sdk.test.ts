@@ -298,6 +298,70 @@ describe("the response is consumed through the schema, exactly as on the API tra
     ).rejects.toThrow(HARNESS_NOT_AUTHENTICATED);
   });
 
+  it("refuses to record a review whose result carried a usage key with no value", async () => {
+    // `"usage" in message` is true for a key present with the value `undefined`, and
+    // `readUsage(undefined)` returns an all-zero total -- which is not `null`, and so walked
+    // straight through the FR-062 guard rather than around it.
+    const empty = Object.assign(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/require-await
+        (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: WELL_FORMED }] } };
+          yield { type: "result", subtype: "success", usage: undefined };
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: empty }).review(request())).rejects.toThrow(
+      /cannot be metered/,
+    );
+  });
+
+  it("names an early-ended turn rather than reporting it as a schema violation", async () => {
+    // The sharpest case is a refused tool: `canUseTool` interrupts the turn, so the most
+    // security-relevant event this transport can produce would otherwise reach the caller as an
+    // ordinary malformed response (Principle VII).
+    const interrupted = Object.assign(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/require-await
+        (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: WELL_FORMED }] } };
+          yield {
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            usage: { input_tokens: 500, output_tokens: 10 },
+          };
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: interrupted }).review(request()),
+    ).rejects.toThrow(/ended the turn early \(error_during_execution\)/);
+  });
+
+  it("abandons a harness that does not answer, rather than holding the only review slot", async () => {
+    // `maxTurns` bounds the conversation and the budget bounds spend; neither bounds time. With
+    // `maxConcurrentReviews: 1`, one hung review holds the only slot forever: the check run stays
+    // in progress, no verdict is reported, and nothing escalates.
+    const hanging = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) =>
+        // eslint-disable-next-line require-yield
+        (async function* () {
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+          throw new Error("aborted");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: hanging, deadlineMs: 25 }).review(request()),
+    ).rejects.toThrow(/did not answer within/);
+  });
+
   it("refuses to record a review whose usage arrived in a shape it does not recognise", async () => {
     // The null guard alone checked that a usage-bearing message *arrived*, not that anything was
     // counted. A renamed field in a later SDK release maps to `0` through `count()`, which is not

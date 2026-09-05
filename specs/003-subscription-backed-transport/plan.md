@@ -87,6 +87,29 @@ with an empty value anyway, so the neutralisation holds under a merging SDK too.
 feature a claim about someone else's contract has turned out weaker than it read, and an experiment
 recorded here is only true of the version it was run against.
 
+## Option names, as the SDK documents them
+
+Three options carry the guarantees this feature claims, and each is a name in someone else's
+package. Cited here so a later reader can check them against the SDK rather than against this
+code's belief about it — pinned at `@anthropic-ai/claude-agent-sdk@0.3.261`.
+
+| option | what the SDK says | why it matters here |
+|---|---|---|
+| `tools` | *"To restrict which tools are available, use the `tools` option"* | The one that actually withholds tools (FR-058) |
+| `allowedTools` | *"tool names that are auto-allowed without prompting for permission"* | Pre-approval only. Asserting this alone was the first shipped defect |
+| `canUseTool` | *"Called before each tool execution to determine if it should be allowed, denied, or prompt"* | The third refusal, independent of both |
+| `env` | *"this value REPLACES the subprocess environment entirely — it is not merged with `process.env`"* | What makes an allowlist possible (FR-063). Measured, see above |
+| `effort` | *"Controls how much effort Claude puts into its response"*, `'low' … 'max'` | The same dial `output_config.effort` spends on `api` (FR-060) |
+| `thinking` | *"`{ type: 'adaptive' }`"*, and effort *"works with adaptive thinking to guide thinking depth"* | Effort without it configures half a dial |
+| `abortController` | Standard `AbortController` | The only time bound this transport has |
+
+`effort` and `thinking` are the weakest of these, and deliberately left so: nothing verifies that the
+harness honours them beyond the option existing on the documented type. If either is ignored,
+`modelEffort` is inert while still being reported (the FR-060 defect, one field over). It is cheap to
+accept because nothing is at risk but depth — a review at the wrong effort is still a review, and
+still validated — whereas the tool and environment options guard containment and billing, which is
+why those get three refusals and an experiment rather than a citation.
+
 ## No task decomposition, and why
 
 The workflow is spec → plan → tasks → implement, and no `tasks.md` was produced. Review asked for
