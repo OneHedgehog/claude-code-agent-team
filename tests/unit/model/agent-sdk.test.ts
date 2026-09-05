@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AgentSdkModelClient,
   extractJson,
+  HARNESS_FELL_BACK_TO_METERED,
   HARNESS_LIMIT_REACHED,
   HARNESS_NOT_AUTHENTICATED,
   scopedEnvironment,
@@ -399,6 +400,47 @@ describe("the response is consumed through the schema, exactly as on the API tra
     await expect(
       new AgentSdkModelClient({ agentQuery: limited }).review(request()),
     ).rejects.toThrow(HARNESS_LIMIT_REACHED);
+  });
+
+  it("names the metered fallback, which is the failure FR-063 exists to prevent", async () => {
+    // The one failure this transport is *for* was the only one arriving as a generic error. An
+    // insufficient environment makes the harness authenticate against the exhausted balance and
+    // answer `Credit balance is too low` — the feature's premise ceasing to hold, silently.
+    const fellBack = Object.assign(
+      () =>
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        (async function* () {
+          throw new Error("Credit balance is too low. Please go to Plans & Billing");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: fellBack }).review(request()),
+    ).rejects.toThrow(HARNESS_FELL_BACK_TO_METERED);
+  });
+
+  it("charges an abandoned review what its prompt certainly cost, not zero", async () => {
+    // On the deadline path no `result` message ever arrives, so `usage` is null by construction —
+    // meaning the most expensive failure this transport has would reach the ledger as free. An
+    // under-estimate in place of a zero: the prompt was sent, so its tokens were spent (FR-031).
+    const hanging = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) =>
+        // eslint-disable-next-line require-yield
+        (async function* () {
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+          throw new Error("aborted");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    const error = (await new AgentSdkModelClient({ agentQuery: hanging, deadlineMs: 25 })
+      .review(request())
+      .catch((e: unknown) => e)) as ModelError;
+
+    expect(error.usage.inputTokens).toBeGreaterThan(0);
   });
 
   it("refuses to record a review the harness never metered", async () => {

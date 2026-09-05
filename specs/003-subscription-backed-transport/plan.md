@@ -77,6 +77,7 @@ Each experiment ran a one-turn query and observed the answer.
 | Does `env` **replace** the child's environment, or merge over `process.env`? | Planted a bogus `ANTHROPIC_BASE_URL` in the parent only | **Replaces.** With `env` set the child answered normally; with `env` omitted it failed to connect |
 | Which variables does subscription auth need? | Removed them one at a time | `PATH`, `HOME` **and `USER`**. `{PATH, HOME}` answers `Credit balance is too low` — it falls back to a metered path |
 | Does an empty `ANTHROPIC_API_KEY` shadow the subscription? | Passed `""` alongside a working set | **No.** It still authenticates. This is *not* true of the Anthropic SDK, where an empty key authenticates as an empty key (CLAUDE.md) |
+| Does `settingSources: []` actually withhold project instructions? | Planted a `CLAUDE.md` in the `cwd` saying to end every reply with a marker word, then ran the same query twice | **Yes.** With `settingSources: ['project']` the reply carried the marker; with `[]` it did not. The control is the point — without it, a clean reply would have proved only that the file was never read from `cwd` at all |
 
 The `USER` result is the one worth carrying forward: it looks cosmetic, it is not, and removing it
 degrades the transport to the exhausted credits **silently** — the run still completes, and only the
@@ -101,9 +102,13 @@ code's belief about it — pinned at `@anthropic-ai/claude-agent-sdk@0.3.261`.
 | `env` | *"this value REPLACES the subprocess environment entirely — it is not merged with `process.env`"* | What makes an allowlist possible (FR-063). Measured, see above |
 | `effort` | *"Controls how much effort Claude puts into its response"*, `'low' … 'max'` | The same dial `output_config.effort` spends on `api` (FR-060) |
 | `thinking` | *"`{ type: 'adaptive' }`"*, and effort *"works with adaptive thinking to guide thinking depth"* | Effort without it configures half a dial |
-| `abortController` | Standard `AbortController` | The only time bound this transport has |
+| `settingSources` | *"Which settings sources to load"* — an empty array loads none | No project instructions, no user memory (FR-058). **Measured**, see below |
+| `abortController` | Standard `AbortController` | The only time bound this transport has (FR-066) |
 
-`effort` and `thinking` are the weakest of these, and deliberately left so: nothing verifies that the
+`settingSources` was the last containment claim resting on an assertion about what was *passed*
+rather than on what happened, which is the shape that has been wrong three times here — so it was
+measured with a control rather than cited. `effort` and `thinking` are now the weakest, and
+deliberately left so: nothing verifies that the
 harness honours them beyond the option existing on the documented type. If either is ignored,
 `modelEffort` is inert while still being reported (the FR-060 defect, one field over). It is cheap to
 accept because nothing is at risk but depth — a review at the wrong effort is still a review, and

@@ -218,8 +218,17 @@ someone else's contract. `tools: []` is the option that actually withholds them 
 pre-approves, and an empty allowlist leaves every tool defined and merely unapproved. `canUseTool`
 denies unconditionally and emits `tool.refused`, a record expected never to appear: if it does, a
 reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
-temporary directory rather than the orchestrator's own checkout, so the fallback if any of that were
-wrong is a directory holding nothing. The child's environment is an allowlist — `PATH`, `HOME`, `USER` and
+temporary directory rather than the orchestrator's own checkout, so a relative path resolved in the
+subprocess no longer lands in the tree holding the App key and every other checkout.
+
+`cwd` is tidiness, not containment, and it is worth being exact about that because it is the layer a
+reader would otherwise fall back on: it moves where *relative* paths resolve and constrains nothing
+absolute, and `HOME` is deliberately reachable because the subscription credential lives there. The
+harness runs as an ordinary child process — no container, no resource limit, no egress restriction
+of our own. So the three refusals are the control and are load-bearing rather than redundant, which
+is why one of them (`canUseTool`) does not depend on the SDK's option semantics at all. Recorded in
+[specs/003](../specs/003-subscription-backed-transport/spec.md) under "What this feature does not
+contain". The child's environment is an allowlist — `PATH`, `HOME`, `USER` and
 a few encoding and scratch variables — rather than the orchestrator's own, which carries the GitHub
 App key, the installation token, and `ANTHROPIC_API_KEY`. The two Anthropic credential names are
 passed **present and empty** rather than dropped, so the neutralisation holds whether the SDK
@@ -228,6 +237,11 @@ it the harness does not reach the subscription at all. That last one is not hard
 exists because the credits behind that key ran out, and a harness that inherited and preferred it
 would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
 while the record claimed otherwise (FR-063).
+
+A harness that authenticates against the metered API balance instead of the subscription — the
+failure FR-063 exists to prevent — says so by name rather than arriving as a generic call failure.
+That is the premise of this transport ceasing to hold, and it should be visible at the moment it
+happens.
 
 The subscription is not immune to running out either. A session or rate limit reads as
 `the review harness has reached a subscription limit`, fails closed as a missing verdict, and is
@@ -242,8 +256,14 @@ operator who wants a detected injection attempt to page someone should wire that
 written down here so the silence is a decision rather than an oversight.
 
 Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
-there is bounded by one turn and by the budget check that authorised it rather than by an output
-ceiling (FR-061) — stated rather than silently dropped. And because this transport resolves no
+there is bounded by one turn, by a **fifteen-minute deadline**, and by the budget check that
+authorised it rather than by an output ceiling (FR-061, FR-066) — stated rather than silently
+dropped. The deadline cancels the harness rather than abandoning it, and it costs something worth
+knowing: a slow-but-working review at `max` effort on a large diff becomes a missing verdict when it
+expires, and the bound is a constant rather than an operating setting, so raising it needs a code
+change. The alternative it replaces is worse — with `maxConcurrentReviews: 1` a hung review holds
+the only slot forever, saying nothing. An abandoned review is charged what its prompt cost rather
+than zero, since an aborted turn reports no usage at all (FR-067). And because this transport resolves no
 credential, FR-051's presence check passes by construction; a host where the subscription is not
 signed in fails at review time instead, which the run names as such rather than reporting a generic
 call failure.

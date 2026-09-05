@@ -64,6 +64,9 @@ const DEADLINE_MS = 15 * 60 * 1000;
 /** What a call that never reached a usable answer consumed, as far as this transport can tell. */
 const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
 
+/** The same ratio the budget forecast uses, so a floor here and an estimate there agree. */
+const CHARS_PER_TOKEN = 4;
+
 /**
  * Said in as many words when the harness is not logged in.
  *
@@ -88,6 +91,24 @@ export const HARNESS_NOT_AUTHENTICATED =
  */
 export const HARNESS_LIMIT_REACHED = "the review harness has reached a subscription limit";
 
+/**
+ * Said when the harness authenticated against the metered balance instead of the subscription.
+ *
+ * This is the failure FR-063 exists to prevent, and until it was named it was the *only* one of
+ * this transport's failure modes reaching the caller as a generic error -- the two less
+ * consequential ones each had a constant. `plan.md` records by experiment that an insufficient
+ * environment makes the harness fall back to a metered path and answer `Credit balance is too low`;
+ * that is the premise of the whole feature ceasing to hold, and the run must say so at the moment
+ * it happens rather than leave it legible only to whoever reads the raw message.
+ */
+export const HARNESS_FELL_BACK_TO_METERED =
+  "the harness authenticated against the metered API balance, not the subscription";
+
+/** Whether a harness failure reads as the metered fallback FR-063 exists to prevent. */
+function looksMetered(message: string): boolean {
+  return /\b(credit balance|purchase credits|plans ?& ?billing)\b/i.test(message);
+}
+
 /** Whether a harness failure reads as the subscription's own limit rather than anything else. */
 function looksRateLimited(message: string): boolean {
   return /\b(session limit|usage limit|rate limit|too many requests|429|quota)\b/i.test(message);
@@ -97,6 +118,7 @@ function looksRateLimited(message: string): boolean {
 function reasonFor(message: string, aborted: boolean, deadlineMs: number): string {
   if (aborted) return `the harness did not answer within ${Math.round(deadlineMs / 1000)}s`;
   if (looksUnauthenticated(message)) return `${HARNESS_NOT_AUTHENTICATED}: ${message}`;
+  if (looksMetered(message)) return `${HARNESS_FELL_BACK_TO_METERED}: ${message}`;
   if (looksRateLimited(message)) return `${HARNESS_LIMIT_REACHED}: ${message}`;
 
   return `model call failed: ${message}`;
@@ -277,6 +299,21 @@ export class AgentSdkModelClient implements ModelClient {
   async review(request: ReviewRequest): Promise<ReviewResponse> {
     const prompt = buildReviewPrompt(request);
 
+    // What the call certainly cost, whatever the harness got round to reporting.
+    //
+    // On the deadline path `usage` is `null` by construction: an aborted turn never yields a
+    // `result` message, so the most expensive failure this transport has -- a full-deadline call at
+    // the configured effort against a large diff -- would otherwise reach the ledger as zero. The
+    // prompt was sent, so its tokens were spent; charging the floor is an under-estimate, but it is
+    // an under-estimate in place of a zero, and Principle IV would rather be approximately right
+    // than precisely wrong about a maximal spend (FR-031).
+    const floor: ModelUsage = {
+      inputTokens: Math.ceil(
+        (prompt.systemPrompt.length + prompt.userContent.length) / CHARS_PER_TOKEN,
+      ),
+      outputTokens: 0,
+    };
+
     let text = "";
     // `null` rather than a zeroed total, so "the harness never said" stays distinguishable from
     // "the harness said nothing was spent". A review that completed at an unknown cost must not
@@ -334,11 +371,18 @@ export class AgentSdkModelClient implements ModelClient {
           },
           // Bounded in time as well as in turns. See DEADLINE_MS.
           abortController: abort,
-          // An empty directory, not the orchestrator's. `cwd` defaults to `process.cwd()`, which
-          // is the tree holding `.agents/settings.json`, the App configuration and every other
-          // checkout -- so the fallback if any of the three refusals above were wrong was the
-          // worst possible one. Nothing here needs a filesystem, so it gets an empty one
-          // (Principle V's filesystem scope, Principle VIII's per-task checkout).
+          // An empty directory, not the orchestrator's. `cwd` defaults to `process.cwd()` -- the
+          // tree holding `.agents/settings.json`, the App configuration and every other checkout --
+          // so a relative path resolved by anything running here landed there by default.
+          //
+          // This is **not** a filesystem scope, and the distinction matters because it is the layer
+          // a reader would otherwise fall back on. `cwd` moves where relative paths resolve; it
+          // constrains nothing absolute, and `HOME` is deliberately reachable because that is where
+          // the subscription credential lives. If the three refusals above turned out to mean less
+          // than they read, a tool would reach the whole host from here, not nothing. The refusals
+          // are load-bearing rather than redundant, and specs/003 records that this subprocess is
+          // not confined -- Principle V's execution-environment containment is a gap this feature
+          // sits in rather than one it closes.
           cwd: scratch,
           // And an environment holding only what the harness needs to start and to authenticate
           // itself. The SDK replaces the subprocess environment entirely when this is set rather
@@ -373,7 +417,7 @@ export class AgentSdkModelClient implements ModelClient {
 
       throw new ModelError(
         reasonFor(message, abort.signal.aborted, this.#deadlineMs),
-        usage ?? ZERO_USAGE,
+        usage ?? floor,
       );
     } finally {
       clearTimeout(deadline);

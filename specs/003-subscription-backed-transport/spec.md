@@ -52,8 +52,28 @@ rather than in `docs/`, which is rewritten whenever operations change.
   gap.
 - **FR-061**: `ReviewRequest.maxTokens` has no equivalent on the `agent-sdk` transport and MUST NOT
   be treated as though it did. The harness bounds turns and money, not output tokens. A review on
-  this transport is bounded by one turn and by the budget check that authorised it; the limitation
-  is stated here rather than left as a field the caller believes is honoured.
+  this transport is bounded by one turn, by the wall-clock deadline of FR-066, and by the budget
+  check that authorised it; the limitation is stated here rather than left as a field the caller
+  believes is honoured.
+- **FR-066**: A review on this transport MUST be bounded in time, and the harness MUST be cancelled
+  rather than abandoned when the bound expires — an orphaned subprocess keeps spending with nothing
+  left to read its answer. Expiry MUST fail with a reason naming the deadline.
+
+  **What it costs, stated because it is a real cost.** The bound is **15 minutes**, a module
+  constant rather than an operating setting. A slow-but-working review — a large diff at `max`
+  effort on a slow host — becomes a missing verdict and a failed gate when it expires, and an
+  operator cannot raise it without a code change. It is not a setting because every operating
+  setting must be schema-validated, reported as effective, and documented (FR-054), and a value
+  nobody has yet needed to change does not earn that surface; if one operator needs a different
+  bound, it should become a setting then rather than be guessed at now.
+
+  The alternative is worse and is what this replaces: with `maxConcurrentReviews: 1`, one hung
+  review holds the only slot indefinitely, the check run stays in progress, no verdict is reported
+  and nothing escalates — a system stopped without saying so (Principle VII).
+- **FR-067**: A review abandoned at the deadline MUST NOT be recorded as costing zero. An aborted
+  turn yields no usage message, so the most expensive failure this transport has would otherwise
+  reach the ledger as free. The prompt was sent and its tokens were spent; the run charges at least
+  that floor (FR-031).
 - **FR-062**: A review the harness did not meter MUST fail rather than record zero. An unmetered
   review cannot be reconciled against the budget check that permitted it, and Principle IV would
   rather stop than under-count (FR-031).
@@ -78,6 +98,24 @@ rather than in `docs/`, which is rewritten whenever operations change.
   `warn` alongside `location.rejected`, and it does **not** open an escalation. This is a
   disclosure rather than an endorsement — an operator who wants injection attempts to page someone
   should wire the record, and this requirement exists so the behaviour is not mistaken for one.
+
+## What this feature does not contain
+
+The harness runs as an ordinary child process: no container, no CPU or memory limit, no egress
+restriction beyond the harness's own. Principle V asks for containment enforced by the execution
+environment — *"a filesystem scope limited to its own checkout and toolchain"* — and the repository
+already parks that behind a spike. This feature is the first subprocess to sit in that gap, which is
+recorded here rather than left to be inferred.
+
+**`cwd` is not a filesystem scope.** It sets where relative paths resolve and nothing more. Absolute
+paths are unaffected, and `HOME` is deliberately reachable because the subscription credential lives
+there. So if the three tool refusals turned out to mean less than they read, the fallback is not "a
+directory holding nothing" — it is the host, entered from an empty directory.
+
+The consequence is that **the refusals in FR-058 are load-bearing rather than redundant**. That is
+the reason there are three of them, one of which (`canUseTool`) is independent of the SDK's option
+semantics entirely and records what it refused. A reader should treat `cwd` as tidiness and the
+refusals as the control.
 
 ## The subscription has its own exhaustion mode
 
@@ -183,3 +221,7 @@ flip specifically.
 - **SC-008**: The harness subprocess receives an allowlisted environment in which
   `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are present and empty, and a test fails if either
   carries a value or is dropped from the set.
+- **SC-009**: A review abandoned at the deadline fails with a reason naming the deadline, and
+  reaches the ledger carrying at least the tokens its prompt cost.
+- **SC-010**: A harness that authenticates against the metered balance instead of the subscription
+  fails with a reason naming that specifically, rather than as a generic call failure.
