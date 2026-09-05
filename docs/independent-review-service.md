@@ -213,6 +213,21 @@ runs with no tools and no inherited settings: a reviewer that could read files o
 no longer be treating the diff as data, and one that inherited the operator's own instructions would
 review the same revision differently on two machines.
 
+Withholding the tools takes three independent refusals, because the first two are claims about
+someone else's contract. `tools: []` is the option that actually withholds them — `allowedTools` only
+pre-approves, and an empty allowlist leaves every tool defined and merely unapproved. `canUseTool`
+denies unconditionally and emits `tool.refused`, a record expected never to appear: if it does, a
+reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
+temporary directory rather than the orchestrator's own checkout, so the fallback if any of that were
+wrong is a directory holding nothing.
+
+Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
+there is bounded by one turn and by the budget check that authorised it rather than by an output
+ceiling (FR-061) — stated rather than silently dropped. And because this transport resolves no
+credential, FR-051's presence check passes by construction; a host where the subscription is not
+signed in fails at review time instead, which the run names as such rather than reporting a generic
+call failure.
+
 `modelEffort` is spent on whichever transport is selected — `output_config.effort` on `api`, the
 harness's own `effort` option on `agent-sdk`. It is reported as an effective setting with every run,
 and a setting reported as effective while being silently inert would make that record an assurance

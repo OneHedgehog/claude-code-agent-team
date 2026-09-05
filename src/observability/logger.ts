@@ -38,6 +38,7 @@ export const REVIEW_EVENTS = [
   "finding.posted",
   "finding.resolved",
   "location.rejected",
+  "tool.refused",
   "finding.waiver_requested",
   "roles.contradiction_recorded",
   "roles.disagreement_escalated",
@@ -79,6 +80,16 @@ export interface RecordFields {
   readonly location?: {
     readonly path: string;
     readonly reason: string;
+  };
+  /**
+   * A tool the harness asked to use on the `agent-sdk` transport, and was refused.
+   *
+   * Expected never to appear. The reviewer is constructed with no tools at all, so a record here
+   * means a diff that arrived as data persuaded a tool-less reviewer to reach for a tool -- the
+   * single most important thing a run could have to say (FR-036, Principle VII).
+   */
+  readonly tool?: {
+    readonly name: string;
   };
   readonly finding?: {
     readonly id: string;

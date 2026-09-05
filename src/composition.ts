@@ -609,6 +609,9 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
             logger.warn("location.rejected", {
               location: { path: rejection.path, reason: rejection.reason },
             }),
+          // Expected never to fire. If it does, a reviewed diff talked a tool-less reviewer into
+          // reaching for a tool, and a run that stayed silent about that would be worthless.
+          onRefusedTool: (toolName) => logger.warn("tool.refused", { tool: { name: toolName } }),
         })
       : modelCredential === null
         ? unavailableModel(MISSING_CREDENTIAL_REASON)

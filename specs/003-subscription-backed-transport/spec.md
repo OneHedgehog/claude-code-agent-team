@@ -32,10 +32,15 @@ rather than in `docs/`, which is rewritten whenever operations change.
   so.
 - **FR-057**: Both transports MUST share one prompt builder and one response parser, so the
   injection guard (FR-036) and the response contract cannot drift between them.
-- **FR-058**: The `agent-sdk` transport MUST run with no tools and no inherited settings. Reviewed
-  content is untrusted data (Principle V); a reviewer able to read files or run commands is no
-  longer treating it as such, and one inheriting the operator's own instructions reviews the same
-  revision differently on two machines (Principle VII).
+- **FR-058**: The `agent-sdk` transport MUST run with no tools, no inherited settings, and no
+  access to the orchestrator's own working tree. Reviewed content is untrusted data (Principle V);
+  a reviewer able to read files or run commands is no longer treating it as such, and one
+  inheriting the operator's own instructions reviews the same revision differently on two machines
+  (Principle VII). Withholding tools MUST use the SDK option that withholds them (`tools`) rather
+  than the one that pre-approves them (`allowedTools`), MUST be backed by a `canUseTool` that
+  denies unconditionally and records the attempt, and MUST run in a directory that holds nothing —
+  three independent refusals, because the first two are claims about an external contract and the
+  guard sits over untrusted input.
 - **FR-059**: A response that does not satisfy the schema MUST become a missing verdict and a failed
   gate on either transport (FR-007). The `agent-sdk` transport asks for the schema in the prompt
   rather than constraining generation, so validation is the only enforcement it has.
@@ -44,6 +49,13 @@ rather than in `docs/`, which is rewritten whenever operations change.
   can see; a transport that reports a value it does not apply defeats that requirement more
   thoroughly than not reporting it, because the record then reads as an assurance rather than a
   gap.
+- **FR-061**: `ReviewRequest.maxTokens` has no equivalent on the `agent-sdk` transport and MUST NOT
+  be treated as though it did. The harness bounds turns and money, not output tokens. A review on
+  this transport is bounded by one turn and by the budget check that authorised it; the limitation
+  is stated here rather than left as a field the caller believes is honoured.
+- **FR-062**: A review the harness did not meter MUST fail rather than record zero. An unmetered
+  review cannot be reconciled against the budget check that permitted it, and Principle IV would
+  rather stop than under-count (FR-031).
 
 ## Waiver 1 — a dependency that is not permissively licensed
 
@@ -86,6 +98,29 @@ Principle IV reserves the decision for a human, and the service was right to sto
 rather than proceed — that behaviour is the reason this record exists rather than a silent
 downgrade.
 
+## Why the operational flip ships with the transport
+
+Review raised this twice: `.agents/settings.json` moving to `"modelTransport": "agent-sdk"` is a
+second decision, and Principle X would land it as its own pull request so that adopting the
+transport stays separately revertible from building it.
+
+The observation is right and the remedy is not available here. The `api` transport has no credits
+behind it. Reverting the flip does not return the repository to a working reviewer; it returns it to
+the deadlock this feature exists to end — a gate with no producer, pull requests waiting on a check
+that will never be reported, and `main` closed to the change that would fix it. Landing the flip
+separately means merging a transport that nothing can review, through a gate that cannot run,
+which is the bypass Principle IV reserves for a human and spec 002 already spent once.
+
+So it ships here, and the cost is stated rather than hidden: this feature is revertible only as a
+whole. A future operator restoring `api` must restore a balance with it.
+
+What was separable *has* been separated — the derived coupling review pointed at. The integration
+tests no longer branch on the settings file; both transports are asserted explicitly on every
+checkout, so flipping the setting in either direction changes no test's meaning.
+
+**Approved by** [@OneHedgehog](https://github.com/OneHedgehog) as part of Waiver 2, which names this
+flip specifically.
+
 ## Success criteria
 
 - **SC-001**: With `modelTransport` unset, the service behaves exactly as before — same transport,
@@ -97,3 +132,7 @@ downgrade.
   if either changes.
 - **SC-005**: A run configured `modelEffort: "max"` spends `max` on either transport, and a test
   fails if a transport reports the value without applying it.
+- **SC-006**: A tool offered to the reviewer on `agent-sdk` is refused and the attempt is recorded;
+  a test fails if any of the three refusals is removed.
+- **SC-007**: A harness stream that reports no usage fails the review rather than recording it at
+  zero tokens.

@@ -20,6 +20,7 @@ import { validateSettings, type LoadedSettings } from "../../src/config/settings
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
+import { AgentSdkModelClient } from "../../src/model/agent-sdk.js";
 
 /**
  * The composition root, constructed and driven (FR-026, FR-027, tasks.md T135).
@@ -631,38 +632,66 @@ describe("what the root wires to the real adapter (Principle II)", () => {
   });
 });
 
-describe("the transport the repository actually operates on is composed too", () => {
-  /** The repository's own settings, unpinned — whatever transport it is really configured for. */
-  function operatingSettings(): LoadedSettings {
-    return validateSettings(
-      JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as unknown,
-    );
+describe("both transports are composed, whichever one the repository operates on", () => {
+  /** The repository's own settings with the transport named explicitly, rather than read. */
+  function settingsFor(modelTransport: "api" | "agent-sdk"): LoadedSettings {
+    const file = JSON.parse(
+      readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8"),
+    ) as Record<string, Record<string, unknown>>;
+
+    return validateSettings({
+      ...file,
+      reviewService: { ...file["reviewService"], modelTransport },
+    });
   }
 
-  it("builds a model for the configured transport without a credential in the environment", async () => {
-    // The prior revision pinned every composition test to `api` while switching this repository to
-    // `agent-sdk`, so the branch that actually runs here was covered by nothing. This test follows
-    // the settings file rather than a constant, and so cannot drift away from production again.
+  /**
+   * Composes with no credential reachable anywhere, and reports what was built.
+   *
+   * Parameterised rather than branching on the settings file. An earlier revision read the file and
+   * asserted one thing under `agent-sdk` and another under `api`, which meant neither branch was
+   * guaranteed to run: flipping the setting silently returned the other path to zero coverage, with
+   * a green suite. Both cases run here on every checkout, whatever the file says.
+   */
+  async function composedWith(modelTransport: "api" | "agent-sdk") {
     const { model: _substituted, ...withoutModel } = stubs(emptyCalls(), {
-      settings: operatingSettings(),
+      settings: settingsFor(modelTransport),
     });
+
+    let keychainReads = 0;
 
     const adapters = await composeService({
       ...withoutModel,
       graphqlClient: noThreads(),
-      readKeychain: () => null,
+      readKeychain: () => {
+        keychainReads += 1;
+
+        return null;
+      },
       env: { HOME: "/tmp/does-not-exist", ANTHROPIC_CONFIG_DIR: "/tmp/does-not-exist" },
     });
 
-    if (operatingSettings().settings.modelTransport === "agent-sdk") {
-      // No credential is resolved on this path — the harness authenticates itself — so FR-051 must
-      // see a source rather than an absence, or every run would stop on a missing credential.
-      expect(adapters.modelCredential).toEqual({ source: "agent-sdk", apiKey: null });
-    } else {
-      expect(adapters.modelCredential).toBeNull();
-    }
+    return { adapters, keychainReads };
+  }
 
-    expect(adapters.model).toBeDefined();
+  it("builds the agent client on agent-sdk, and never looks for a credential", async () => {
+    const { adapters, keychainReads } = await composedWith("agent-sdk");
+
+    // The specific class, not merely "something was built". `expect(model).toBeDefined()` is
+    // satisfied by `unavailableModel` too, and so distinguishes none of the three constructions.
+    expect(adapters.model).toBeInstanceOf(AgentSdkModelClient);
+    // No credential is resolved on this path -- the harness authenticates itself -- so FR-051 must
+    // see a source rather than an absence, or every run would stop on a missing credential.
+    expect(adapters.modelCredential).toEqual({ source: "agent-sdk", apiKey: null });
+    expect(keychainReads).toBe(0);
+  });
+
+  it("resolves a credential on api, and stops when there is none", async () => {
+    const { adapters, keychainReads } = await composedWith("api");
+
+    expect(adapters.model).not.toBeInstanceOf(AgentSdkModelClient);
+    expect(adapters.modelCredential).toBeNull();
+    expect(keychainReads).toBeGreaterThan(0);
   });
 
   it("passes the prerequisite check on the agent transport, which holds no credential", () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { AgentSdkModelClient, extractJson, type AgentQuery } from "../../../src/model/agent-sdk.js";
+import {
+  AgentSdkModelClient,
+  extractJson,
+  HARNESS_NOT_AUTHENTICATED,
+  type AgentQuery,
+} from "../../../src/model/agent-sdk.js";
 import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
 
 const WELL_FORMED = JSON.stringify({
@@ -48,14 +53,59 @@ function fakeQuery(text: string, usage?: Record<string, number>) {
 }
 
 describe("the harness is asked for a review and nothing else (FR-036, Principle V)", () => {
-  it("grants no tools at all", async () => {
-    // The diff is attacker-influenced data. This transport spawns a harness whose default posture
-    // is tool-bearing, so the empty list is the whole of the guard on this path -- deleting it
-    // would let a reviewed diff persuade the reviewer to read a file or run a command.
+  it("exposes no tools, using the option that actually withholds them", async () => {
+    // The diff is attacker-influenced data and this transport spawns a harness whose default
+    // posture is tool-bearing, so this is the whole of the guard on this path.
+    //
+    // `tools` is the option that means "no tools", and the distinction is not pedantry: the SDK
+    // documents `allowedTools` as "tool names that are auto-allowed without prompting for
+    // permission" and says outright "to restrict which tools are available, use the `tools` option
+    // instead". An earlier revision asserted only `allowedTools: []`, which left every tool defined
+    // and merely un-approved -- a permission prompt with nobody present to answer it.
+    const messages = fakeQuery(WELL_FORMED);
+    await new AgentSdkModelClient({ agentQuery: messages }).review(request());
+
+    expect(messages.calls[0]?.options["tools"]).toEqual([]);
+  });
+
+  it("pre-approves nothing either", async () => {
     const messages = fakeQuery(WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: messages }).review(request());
 
     expect(messages.calls[0]?.options["allowedTools"]).toEqual([]);
+  });
+
+  it("refuses a tool at the moment of use, whatever the other two options turn out to mean", async () => {
+    // The belt-and-braces line. `tools: []` should make this unreachable; it exists because the
+    // other two assertions are claims about an external contract, and a guard over untrusted input
+    // must not rest on any one of them being read the way its documentation reads today.
+    const messages = fakeQuery(WELL_FORMED);
+    const refused: string[] = [];
+    await new AgentSdkModelClient({
+      agentQuery: messages,
+      onRefusedTool: (name) => refused.push(name),
+    }).review(request());
+
+    const canUseTool = messages.calls[0]?.options["canUseTool"] as (
+      toolName: string,
+    ) => Promise<{ behavior: string }>;
+
+    expect(await canUseTool("Bash")).toMatchObject({ behavior: "deny" });
+    // And it is audible. A reviewed diff talking a tool-less reviewer into reaching for a tool is
+    // the single most important thing a run could have to say (FR-024).
+    expect(refused).toEqual(["Bash"]);
+  });
+
+  it("runs in an empty directory rather than the orchestrator's own tree", async () => {
+    // `cwd` defaults to `process.cwd()` -- the tree holding `.agents/settings.json`, the App
+    // configuration and every other checkout. If any refusal above were wrong, that was the
+    // fallback the harness would have been standing in.
+    const messages = fakeQuery(WELL_FORMED);
+    await new AgentSdkModelClient({ agentQuery: messages }).review(request());
+
+    const cwd = String(messages.calls[0]?.options["cwd"]);
+    expect(cwd).not.toBe(process.cwd());
+    expect(cwd.startsWith(process.cwd())).toBe(false);
   });
 
   it("inherits no settings, so the same revision reviews the same on any machine", async () => {
@@ -150,17 +200,63 @@ describe("the response is consumed through the schema, exactly as on the API tra
     expect(response.usage.outputTokens).toBe(20);
   });
 
-  it("raises ModelError carrying the spend when the harness itself fails", async () => {
-    const failing = (() => {
-      // eslint-disable-next-line require-yield, @typescript-eslint/require-await
-      return (async function* () {
-        throw new Error("harness exited");
-      })();
-    }) as never;
+  it("raises ModelError carrying the spend when the harness fails part-way through", async () => {
+    // Typed the way every other fake here is typed. An earlier revision wrote `as never`, which
+    // erased the call signature entirely: a plain throwing function -- which never enters the async
+    // iteration, and so is not the path under test at all -- passed the test just as well.
+    const failing = Object.assign(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/require-await
+        (async function* () {
+          yield { type: "result", usage: { input_tokens: 700, output_tokens: 40 } };
+          throw new Error("harness exited");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    const error = await new AgentSdkModelClient({ agentQuery: failing })
+      .review(request())
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ModelError);
+    // The second half of the contract, and the half the previous test dropped: what a failed call
+    // consumed is still spend, and a ledger that lost it would under-count (FR-031).
+    expect((error as ModelError).usage).toEqual({ inputTokens: 700, outputTokens: 40 });
+  });
+
+  it("names an unauthenticated harness rather than folding it into a generic failure", async () => {
+    // FR-051's presence check passes by construction on this transport, so the failure it exists to
+    // catch arrives at review time instead. It cannot be prevented from here without spending a
+    // call to find out -- but it can be said, rather than surfacing as `model call failed: 401`.
+    const unauthenticated = Object.assign(
+      () =>
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        (async function* () {
+          throw new Error("401 Unauthorized");
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
 
     await expect(
-      new AgentSdkModelClient({ agentQuery: failing }).review(request()),
-    ).rejects.toThrow(ModelError);
+      new AgentSdkModelClient({ agentQuery: unauthenticated }).review(request()),
+    ).rejects.toThrow(HARNESS_NOT_AUTHENTICATED);
+  });
+
+  it("refuses to record a review the harness never metered", async () => {
+    // A stream that ends without a usage-bearing result once recorded a completed review at zero
+    // tokens -- an under-count in the ledger rather than an error. Principle IV would rather stop.
+    const silent = Object.assign(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/require-await
+        (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text: WELL_FORMED }] } };
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: silent }).review(request())).rejects.toThrow(
+      /cannot be metered/,
+    );
   });
 });
 
