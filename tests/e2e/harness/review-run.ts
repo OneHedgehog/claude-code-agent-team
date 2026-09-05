@@ -10,7 +10,6 @@ import {
   type ServiceAdapters,
 } from "../../../src/composition.js";
 import type { LoadedSettings } from "../../../src/config/settings.js";
-import type { ModelClient } from "../../../src/model/client.js";
 import { appConfigDirectory } from "../../../src/github/auth.js";
 import { resolveInTarget } from "../../../src/config/target.js";
 import { hostSlotsDirectory, noSlot, withHostLease } from "../../../src/host-lease.js";
@@ -59,12 +58,8 @@ export interface ComposeFixtureOptions extends RunEnvironmentOptions {
   readonly client: FixtureClient;
   /** The checkout the run is addressed at (FR-026). Normally a worktree at the revision. */
   readonly checkoutPath: string;
-  /**
-   * The one permitted substitution. Normally `ScriptedModelClient`; the `agent-sdk` scenario passes
-   * a real `AgentSdkModelClient` with only the SDK's `query` scripted, so that transport's adapter
-   * runs rather than being replaced along with the model.
-   */
-  readonly model?: ModelClient;
+  /** The one permitted substitution (FR-029, FR-030). */
+  readonly model?: ScriptedModelClient;
   /**
    * The scripted harness for the `agent-sdk` transport. Passed through to `composeService` so the
    * root builds the adapter, rather than the scenario building one the root would not.

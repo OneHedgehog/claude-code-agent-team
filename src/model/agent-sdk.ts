@@ -37,9 +37,6 @@ const MAX_TURNS = 1;
 /** The wall-clock bound, and what it costs an operator: FR-066. */
 const DEADLINE_MS = 15 * 60 * 1000;
 
-/** What a call that never reached a usable answer consumed, as far as this transport can tell. */
-const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0 };
-
 /** The same ratio the budget forecast uses, so a floor here and an estimate there agree. */
 const CHARS_PER_TOKEN = 4;
 
@@ -64,6 +61,20 @@ function looksRateLimited(message: string): boolean {
   return /\b(session limit|usage limit|rate limit|too many requests|429|quota)\b/i.test(message);
 }
 
+/**
+ * What to call a turn the harness ended early.
+ *
+ * A refusal is named rather than left as a subtype, because it is the one cause an author can act
+ * on: their diff asked the reviewer to use a tool. Without this the gate stated
+ * `error_during_execution`, which traces to nothing (FR-064, Principle VII).
+ */
+function earlyEndReason(subtype: string, refused: boolean): string {
+  return refused
+    ? "reviewed content attempted to use a tool; the reviewer refused and the turn ended, " +
+        "so this revision produced no verdict"
+    : `the harness ended the turn early (${subtype})`;
+}
+
 /** What to call a harness failure, most specific cause first. */
 function reasonFor(message: string, aborted: boolean, deadlineMs: number): string {
   if (aborted) return `the harness did not answer within ${Math.round(deadlineMs / 1000)}s`;
@@ -86,7 +97,6 @@ export type AgentQuery = typeof query;
 
 export interface AgentSdkOptions {
   readonly agentQuery?: AgentQuery;
-  readonly model?: string;
   /** A boundary that refuses silently on one transport and audibly on the other (FR-024). */
   readonly onRejectedLocation?: RejectedLocation;
   /**
@@ -187,7 +197,6 @@ function readUsage(raw: unknown): ModelUsage {
 
 export class AgentSdkModelClient implements ModelClient {
   readonly #query: AgentQuery;
-  readonly #model: string;
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
@@ -195,7 +204,6 @@ export class AgentSdkModelClient implements ModelClient {
 
   constructor(options: AgentSdkOptions = {}) {
     this.#query = options.agentQuery ?? query;
-    this.#model = options.model ?? REVIEW_MODEL;
     this.#onRejectedLocation = options.onRejectedLocation;
     this.#onRefusedTool = options.onRefusedTool;
     this.#env = options.env ?? process.env;
@@ -238,12 +246,15 @@ export class AgentSdkModelClient implements ModelClient {
 
     // Why the harness stopped, when it says. Otherwise a truncated run reads as malformed JSON.
     let resultSubtype: string | null = null;
+    // Whether reviewed content tried to make the reviewer act. It ends the turn, so it becomes the
+    // reason the gate states rather than an opaque subtype nobody can trace to a cause (FR-064).
+    let refused = false;
 
     try {
       for await (const message of this.#query({
         prompt: `${prompt.userContent}\n\n${jsonOnlyInstruction()}`,
         options: {
-          model: this.#model,
+          model: REVIEW_MODEL,
           systemPrompt: prompt.systemPrompt,
           maxTurns: MAX_TURNS,
           // Reported as effective on every run, so it must actually take effect (FR-060). Paired
@@ -261,6 +272,7 @@ export class AgentSdkModelClient implements ModelClient {
           // Refused a third time at the moment of use, because the two above are claims about
           // someone else's contract and this one is not (FR-058).
           canUseTool: (toolName: string) => {
+            refused = true;
             this.#onRefusedTool?.(toolName);
 
             return Promise.resolve({
@@ -320,10 +332,7 @@ export class AgentSdkModelClient implements ModelClient {
       // result -- so with the guards the other way round, the most security-relevant event this
       // transport can produce (a reviewed diff talking a tool-less reviewer into reaching for a
       // tool) surfaced as a metering failure (Principle VII).
-      throw new ModelError(
-        `the harness ended the turn early (${resultSubtype})`,
-        usage ?? ZERO_USAGE,
-      );
+      throw new ModelError(earlyEndReason(resultSubtype, refused), usage ?? floor);
     }
 
     if (usage === null || usage.inputTokens + usage.outputTokens === 0) {
@@ -335,10 +344,7 @@ export class AgentSdkModelClient implements ModelClient {
       // null guard and reach the ledger as a completed review that cost nothing. A review that
       // produced an answer consumed tokens by construction, so zero is not a possible true value
       // here; it only ever means "not counted" (FR-062, FR-031).
-      throw new ModelError(
-        "harness reported no usage; the review cannot be metered",
-        usage ?? ZERO_USAGE,
-      );
+      throw new ModelError("harness reported no usage; the review cannot be metered", floor);
     }
 
     // The spread is not redundant, though it reads that way: `parseReviewResponse` returns

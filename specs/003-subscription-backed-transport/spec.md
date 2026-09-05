@@ -92,41 +92,26 @@ rather than in `docs/`, which is rewritten whenever operations change.
   precedence rule for the same reason: *which* credential the harness would prefer is a claim about
   someone else's contract needing re-checking on every upgrade, and a key that cannot authenticate
   need not be ranked.
-- **FR-064**: A refused tool (`tool.refused`) is **recorded and not notified**. It is a detected
-  injection attempt against the gate, and it fails closed: the tool is denied and the turn
-  interrupted, so the review completes under the same constraints as any other. It is logged at
-  `warn` alongside `location.rejected`, and it does **not** open an escalation. This is a
-  disclosure rather than an endorsement — an operator who wants injection attempts to page someone
-  should wire the record, and this requirement exists so the behaviour is not mistaken for one.
+- **FR-064**: A refused tool (`tool.refused`) MUST be **recorded, named in the gate's stated reason,
+  and not escalated**.
 
-## What this feature does not contain
+  The earlier wording of this requirement said a refusal "fails closed — the tool is denied and the
+  turn interrupted — so the review completes under the same constraints as any other", and rested
+  its no-notification decision on that. It was wrong: `interrupt: true` ends the turn, the harness
+  emits a non-success result, and **the revision produces no verdict at all**. One tool-seeking line
+  in a reviewed diff destroys that revision's review.
 
-The harness runs as an ordinary child process: no container, no CPU or memory limit, no egress
-restriction beyond the harness's own. Principle V asks for containment enforced by the execution
-environment — *"a filesystem scope limited to its own checkout and toolchain"* — and the repository
-already parks that behind a spike. This feature is the first subprocess to sit in that gap, which is
-recorded here rather than left to be inferred.
+  Restated on what actually happens, the decision changes shape. The refusal is *not* silent: it
+  fails the gate, and the gate states `reviewed content attempted to use a tool; the reviewer
+  refused and the turn ended, so this revision produced no verdict` — rather than an opaque harness
+  subtype that traces to nothing. That reason is where an author looks, and it is the one cause they
+  can act on.
 
-**`cwd` is not a filesystem scope.** It sets where relative paths resolve and nothing more. Absolute
-paths are unaffected, and `HOME` is deliberately reachable because the subscription credential lives
-there. So if the three tool refusals turned out to mean less than they read, the fallback is not "a
-directory holding nothing" — it is the host, entered from an empty directory.
-
-The consequence is that **the refusals in FR-058 are load-bearing rather than redundant**. That is
-the reason there are three of them, one of which (`canUseTool`) is independent of the SDK's option
-semantics entirely and records what it refused. A reader should treat `cwd` as tidiness and the
-refusals as the control.
-
-## The subscription has its own exhaustion mode
-
-Not hypothetical: round 4 of this feature's own review produced no verdict from the implementation
-reviewer because the harness answered `You've hit your session limit · resets 10:10pm`.
-
-This matters because the feature's whole premise is that a metered balance running out closed the
-gate, and the subscription route removes that dependency. It removes *that* limit and introduces a
-different one. A session limit and an exhausted credit balance are different failures with the same
-shape: the reviewer cannot run, the run reports a missing verdict, and the gate fails closed.
-
+  It does not open an escalation because the failed gate is already the visible artifact, nothing is
+  left unsafe, and the next revision is reviewed normally. An operator who wants a detected
+  injection attempt to page someone should wire the `tool.refused` record; this requirement exists
+  so that choice is made against what the system does rather than against what its documentation
+  once claimed.
 - **FR-065**: A harness refusal for a session or rate limit MUST fail closed as a missing verdict,
   like any other model failure (FR-007), and MUST be legible as what it is rather than folded into a
   generic call failure — the same obligation `HARNESS_NOT_AUTHENTICATED` discharges for an

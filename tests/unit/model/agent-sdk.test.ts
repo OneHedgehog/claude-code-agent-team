@@ -239,8 +239,8 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 
   it("raises ModelError carrying the spend when the harness fails part-way through", async () => {
-    // Typed as `AgentQuery`, not `as never`: that erased the signature, so a plain throwing
-    // function -- which never enters the iteration under test -- passed just as well.
+    // Typed as `AgentQuery` rather than `as never`. The cast erased the call signature, so a fake
+    // that threw without ever entering the async iteration satisfied this test too.
     const failing = Object.assign(
       () =>
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -316,6 +316,27 @@ describe("the response is consumed through the schema, exactly as on the API tra
     await expect(
       new AgentSdkModelClient({ agentQuery: interrupted }).review(request()),
     ).rejects.toThrow(/ended the turn early \(error_during_execution\)/);
+  });
+
+  it("names a refusal as the cause when reviewed content is what ended the turn", async () => {
+    // `error_during_execution` traces to nothing. A refusal is the one cause the author can act
+    // on, so it is what the gate states (FR-064).
+    const seeking = Object.assign(
+      (input: {
+        options?: {
+          canUseTool?: (n: string, i: Record<string, unknown>, o: unknown) => Promise<unknown>;
+        };
+      }) =>
+        (async function* () {
+          await input.options?.canUseTool?.("Bash", {}, {});
+          yield { type: "result", subtype: "error_during_execution", usage: undefined };
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: seeking }).review(request()),
+    ).rejects.toThrow(/attempted to use a tool/);
   });
 
   it("abandons a harness that does not answer, rather than holding the only review slot", async () => {
