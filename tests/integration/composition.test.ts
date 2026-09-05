@@ -12,12 +12,15 @@ import {
   type ComposeOptions,
 } from "../../src/composition.js";
 import { createTarget } from "../../src/config/target.js";
+import { REQUIRED_INSTALLATION_PERMISSIONS } from "../../src/github/auth.js";
+import { checkPrerequisites } from "../../src/review/prerequisites.js";
 import { MERGE_GATE_CHECK_NAME } from "../../src/github/check-run.js";
 import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
+import { AgentSdkModelClient } from "../../src/model/agent-sdk.js";
 
 /**
  * The composition root, constructed and driven (FR-026, FR-027, tasks.md T135).
@@ -48,9 +51,25 @@ const TARGET = createTarget({
  * configured reserve. A literal would test a number this repository is free to change, and would
  * pass for the wrong reason the moment it did.
  */
-const SETTINGS: LoadedSettings = validateSettings(
-  JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as unknown,
-);
+/**
+ * The repository's own settings, with the transport pinned to `api`.
+ *
+ * These tests exercise the credential-resolving path and the adapter the root builds from it, which
+ * is a different transport from the one this repository happens to operate on today. Reading the
+ * file keeps the budgets and caps honest; pinning the transport keeps an operational choice from
+ * silently changing what is under test.
+ */
+const SETTINGS: LoadedSettings = (() => {
+  const file = JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as Record<
+    string,
+    Record<string, unknown>
+  >;
+
+  return validateSettings({
+    ...file,
+    reviewService: { ...file["reviewService"], modelTransport: "api" },
+  });
+})();
 
 const HEAD = "c0ffee".padEnd(40, "0");
 
@@ -88,6 +107,8 @@ function stubs(calls: Calls, overrides: Partial<ComposeOptions> = {}): ComposeOp
   return {
     target: TARGET,
     runId: "run-composition",
+    // Pinned, so the repository's own operational transport cannot change what these tests build.
+    settings: SETTINGS,
     // The real `resolveModelCredential` runs against this: FR-051 checks the credential's
     // *presence* before any spend, so a run with no credential at all stops here rather than at a
     // 401 — which is exactly what the third test below asserts.
@@ -608,5 +629,85 @@ describe("what the root wires to the real adapter (Principle II)", () => {
         .map((line) => JSON.parse(line) as { event: string })
         .filter((r) => r.event === "location.rejected"),
     ).toEqual([]);
+  });
+});
+
+describe("both transports are composed, whichever one the repository operates on", () => {
+  /** The repository's own settings with the transport named explicitly, rather than read. */
+  function settingsFor(modelTransport: "api" | "agent-sdk"): LoadedSettings {
+    const file = JSON.parse(
+      readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8"),
+    ) as Record<string, Record<string, unknown>>;
+
+    return validateSettings({
+      ...file,
+      reviewService: { ...file["reviewService"], modelTransport },
+    });
+  }
+
+  /**
+   * Composes with no credential reachable anywhere, and reports what was built.
+   *
+   * Parameterised rather than branching on the settings file. An earlier revision read the file and
+   * asserted one thing under `agent-sdk` and another under `api`, which meant neither branch was
+   * guaranteed to run: flipping the setting silently returned the other path to zero coverage, with
+   * a green suite. Both cases run here on every checkout, whatever the file says.
+   */
+  async function composedWith(modelTransport: "api" | "agent-sdk") {
+    const { model: _substituted, ...withoutModel } = stubs(emptyCalls(), {
+      settings: settingsFor(modelTransport),
+    });
+
+    let keychainReads = 0;
+
+    const adapters = await composeService({
+      ...withoutModel,
+      graphqlClient: noThreads(),
+      readKeychain: () => {
+        keychainReads += 1;
+
+        return null;
+      },
+      env: { HOME: "/tmp/does-not-exist", ANTHROPIC_CONFIG_DIR: "/tmp/does-not-exist" },
+    });
+
+    return { adapters, keychainReads };
+  }
+
+  it("builds the agent client on agent-sdk, and never looks for a credential", async () => {
+    const { adapters, keychainReads } = await composedWith("agent-sdk");
+
+    // The specific class, not merely "something was built". `expect(model).toBeDefined()` is
+    // satisfied by `unavailableModel` too, and so distinguishes none of the three constructions.
+    expect(adapters.model).toBeInstanceOf(AgentSdkModelClient);
+    // No credential is resolved on this path -- the harness authenticates itself -- so FR-051 must
+    // see a source rather than an absence, or every run would stop on a missing credential.
+    expect(adapters.modelCredential).toEqual({ source: "agent-sdk", apiKey: null });
+    expect(keychainReads).toBe(0);
+  });
+
+  it("resolves a credential on api, and stops when there is none", async () => {
+    const { adapters, keychainReads } = await composedWith("api");
+
+    expect(adapters.model).not.toBeInstanceOf(AgentSdkModelClient);
+    expect(adapters.modelCredential).toBeNull();
+    expect(keychainReads).toBeGreaterThan(0);
+  });
+
+  it("passes the prerequisite check on the agent transport, which holds no credential", () => {
+    // The credential check exists so an absent one costs zero tokens (FR-051). A transport that
+    // needs no credential must not read as an absent one, or it would stop every run.
+    const result = checkPrerequisites({
+      granted: Object.fromEntries(
+        Object.entries(REQUIRED_INSTALLATION_PERMISSIONS).map(([name, level]) => [name, level]),
+      ),
+      protection: { kind: "protected", requiredContexts: [MERGE_GATE_CHECK_NAME] },
+      gateName: MERGE_GATE_CHECK_NAME,
+      baseBranch: "main",
+      modelCredential: { source: "agent-sdk", apiKey: null },
+    });
+
+    expect(result.modelCredentialPresent).toBe(true);
+    expect(result.satisfied).toBe(true);
   });
 });

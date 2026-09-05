@@ -184,6 +184,55 @@ with every run.
 
 ## Decisions and trade-offs
 
+**The reviewer reaches the model one of two ways, and `modelTransport` chooses.** The requirements,
+and the two constitutional waivers permitting the second one, are recorded in
+[specs/003-subscription-backed-transport](../specs/003-subscription-backed-transport/spec.md) —
+a proprietary dependency, and a substitution the operator approved after a metered resource ran
+out. `api` calls the Messages API with a credential this process resolves — metered against an
+organisation's API credits. `agent-sdk` runs Claude Code as a library, which authenticates itself
+and bills the operator's subscription.
+
+The second exists because the first has a failure mode that closes the repository. The gate has one
+producer; when its credits run out mid-session the reviewer stops, and because a concluded failing
+check run already exists for that revision, nothing retries it. `main` is then shut behind a
+reviewer that cannot run — including to the change that would fix it. A subscription-funded
+transport removes the metered dependency from the critical path rather than making the outage
+cheaper.
+
+What it costs is the response *guarantee*. The API transport constrains the reply with
+`output_config.format` before a byte is generated; the agent transport asks for the schema in words
+and reproduces it in the prompt. Both then go through the same `parseReviewResponse`, so validation
+is unchanged and a malformed answer still becomes a missing verdict and a failed gate (FR-007) —
+what is lost is that malformed answers were previously impossible rather than merely rejected. That
+is a real reduction, and the reason `api` remains the default: no operator should have their billing
+or their contract changed by an upgrade.
+
+Both transports share `buildReviewPrompt` and `parseReviewResponse` rather than reimplementing them,
+so the injection guard (FR-036) and the response contract cannot drift apart. The agent transport
+runs with no tools and no inherited settings: a reviewer that could read files or run commands would
+no longer be treating the diff as data, and one that inherited the operator's own instructions would
+review the same revision differently on two machines.
+
+Withholding the tools takes three independent refusals, because the first two are claims about
+someone else's contract. `tools: []` is the option that actually withholds them — `allowedTools` only
+pre-approves, and an empty allowlist leaves every tool defined and merely unapproved. `canUseTool`
+denies unconditionally and emits `tool.refused`, a record expected never to appear: if it does, a
+reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
+temporary directory rather than the orchestrator's own checkout, so the fallback if any of that were
+wrong is a directory holding nothing.
+
+Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
+there is bounded by one turn and by the budget check that authorised it rather than by an output
+ceiling (FR-061) — stated rather than silently dropped. And because this transport resolves no
+credential, FR-051's presence check passes by construction; a host where the subscription is not
+signed in fails at review time instead, which the run names as such rather than reporting a generic
+call failure.
+
+`modelEffort` is spent on whichever transport is selected — `output_config.effort` on `api`, the
+harness's own `effort` option on `agent-sdk`. It is reported as an effective setting with every run,
+and a setting reported as effective while being silently inert would make that record an assurance
+rather than a disclosure (FR-060).
+
 **The model call is behind an interface** so end-to-end tests drive the entire flow with a scripted
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
