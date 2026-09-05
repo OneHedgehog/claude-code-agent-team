@@ -18,7 +18,8 @@
       "assignee": "OneHedgehog"
     },
     "pollIntervalSeconds": 60,
-    "maxConcurrentReviews": 1
+    "maxConcurrentReviews": 1,
+    "modelTransport": "agent-sdk"
   },
   "host": {
     "maxConcurrentAgents": 2

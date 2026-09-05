@@ -52,7 +52,13 @@ export interface MessagesApi {
   create(params: Record<string, unknown>): Promise<unknown>;
 }
 
-export type CredentialSource = "environment" | "keychain" | "oauth-profile";
+/**
+ * Where a credential came from. `agent-sdk` is the odd one: it names a transport that holds no
+ * credential at all, because Claude Code authenticates itself. It is a source rather than an
+ * absence so that FR-051's presence check has something true to report -- "no credential" and
+ * "no credential needed" are different states, and only the first should stop a run.
+ */
+export type CredentialSource = "environment" | "keychain" | "oauth-profile" | "agent-sdk";
 
 export interface ModelCredential {
   readonly source: CredentialSource;

@@ -184,6 +184,32 @@ with every run.
 
 ## Decisions and trade-offs
 
+**The reviewer reaches the model one of two ways, and `modelTransport` chooses.** `api` calls the
+Messages API with a credential this process resolves — metered against an organisation's API
+credits. `agent-sdk` runs Claude Code as a library, which authenticates itself and bills the
+operator's subscription.
+
+The second exists because the first has a failure mode that closes the repository. The gate has one
+producer; when its credits run out mid-session the reviewer stops, and because a concluded failing
+check run already exists for that revision, nothing retries it. `main` is then shut behind a
+reviewer that cannot run — including to the change that would fix it. A subscription-funded
+transport removes the metered dependency from the critical path rather than making the outage
+cheaper.
+
+What it costs is the response *guarantee*. The API transport constrains the reply with
+`output_config.format` before a byte is generated; the agent transport asks for the schema in words
+and reproduces it in the prompt. Both then go through the same `parseReviewResponse`, so validation
+is unchanged and a malformed answer still becomes a missing verdict and a failed gate (FR-007) —
+what is lost is that malformed answers were previously impossible rather than merely rejected. That
+is a real reduction, and the reason `api` remains the default: no operator should have their billing
+or their contract changed by an upgrade.
+
+Both transports share `buildReviewPrompt` and `parseReviewResponse` rather than reimplementing them,
+so the injection guard (FR-036) and the response contract cannot drift apart. The agent transport
+runs with no tools and no inherited settings: a reviewer that could read files or run commands would
+no longer be treating the diff as data, and one that inherited the operator's own instructions would
+review the same revision differently on two machines.
+
 **The model call is behind an interface** so end-to-end tests drive the entire flow with a scripted
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.

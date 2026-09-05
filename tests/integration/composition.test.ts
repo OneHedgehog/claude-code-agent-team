@@ -48,9 +48,25 @@ const TARGET = createTarget({
  * configured reserve. A literal would test a number this repository is free to change, and would
  * pass for the wrong reason the moment it did.
  */
-const SETTINGS: LoadedSettings = validateSettings(
-  JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as unknown,
-);
+/**
+ * The repository's own settings, with the transport pinned to `api`.
+ *
+ * These tests exercise the credential-resolving path and the adapter the root builds from it, which
+ * is a different transport from the one this repository happens to operate on today. Reading the
+ * file keeps the budgets and caps honest; pinning the transport keeps an operational choice from
+ * silently changing what is under test.
+ */
+const SETTINGS: LoadedSettings = (() => {
+  const file = JSON.parse(readFileSync(`${process.cwd()}/.agents/settings.json`, "utf8")) as Record<
+    string,
+    Record<string, unknown>
+  >;
+
+  return validateSettings({
+    ...file,
+    reviewService: { ...file["reviewService"], modelTransport: "api" },
+  });
+})();
 
 const HEAD = "c0ffee".padEnd(40, "0");
 
@@ -88,6 +104,8 @@ function stubs(calls: Calls, overrides: Partial<ComposeOptions> = {}): ComposeOp
   return {
     target: TARGET,
     runId: "run-composition",
+    // Pinned, so the repository's own operational transport cannot change what these tests build.
+    settings: SETTINGS,
     // The real `resolveModelCredential` runs against this: FR-051 checks the credential's
     // *presence* before any spend, so a run with no credential at all stops here rather than at a
     // 401 — which is exactly what the third test below asserts.

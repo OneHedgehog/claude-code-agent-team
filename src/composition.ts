@@ -47,6 +47,7 @@ import {
 import { createLedger, JsonlLedgerStore, type Ledger } from "./ledger/tokens.js";
 import Anthropic from "@anthropic-ai/sdk";
 
+import { AgentSdkModelClient } from "./model/agent-sdk.js";
 import {
   AnthropicModelClient,
   MAX_OUTPUT_TOKENS,
@@ -575,30 +576,41 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
   const octokit = options.octokit ?? new Octokit({ auth: authenticated.token });
   const graphqlClient = options.graphqlClient ?? graphql;
 
-  const modelCredential = resolveModelCredential({
-    env,
-    keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),
-  });
+  // `agent-sdk` runs Claude Code as a library, which authenticates itself against the operator's
+  // subscription -- so this process holds no model credential at all, and FR-051's presence check
+  // has nothing to check. Reported as a credential whose source is the transport, rather than as
+  // an absent one, so a run that cannot reach the model still fails for a stated reason.
+  const transport = settings.settings.modelTransport;
+
+  const modelCredential =
+    transport === "agent-sdk"
+      ? ({ source: "agent-sdk", apiKey: null } as ModelCredential)
+      : resolveModelCredential({
+          env,
+          keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),
+        });
 
   // Constructed only when a credential exists. An absent one is not an error *here* — it is a
   // startup prerequisite, reported with a reason and zero spend rather than as a 401 mid-review
   // (FR-032, FR-051) — so the client is only built once there is something to build it from.
   const model =
     options.model ??
-    (modelCredential === null
-      ? unavailableModel(MISSING_CREDENTIAL_REASON)
-      : new AnthropicModelClient({
-          credential: modelCredential,
-          // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
-          // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
-          messages: options.messages ?? anthropicMessages(modelCredential),
-          // A refused location is a fact about model output, and one of its causes is an attempt
-          // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
-          onRejectedLocation: (rejection) =>
-            logger.warn("location.rejected", {
-              location: { path: rejection.path, reason: rejection.reason },
-            }),
-        }));
+    (transport === "agent-sdk"
+      ? new AgentSdkModelClient()
+      : modelCredential === null
+        ? unavailableModel(MISSING_CREDENTIAL_REASON)
+        : new AnthropicModelClient({
+            credential: modelCredential,
+            // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
+            // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
+            messages: options.messages ?? anthropicMessages(modelCredential),
+            // A refused location is a fact about model output, and one of its causes is an attempt
+            // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
+            onRejectedLocation: (rejection) =>
+              logger.warn("location.rejected", {
+                location: { path: rejection.path, reason: rejection.reason },
+              }),
+          }));
 
   const ledger =
     options.ledger ??

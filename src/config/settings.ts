@@ -28,6 +28,13 @@ export type RoleName = "security" | "implementation";
 export type Severity = "critical" | "high" | "medium" | "low";
 export type ModelEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
+/**
+ * How the reviewer reaches the model. `api` holds a credential and calls the Messages API, metered
+ * against an organisation's credits; `agent-sdk` runs Claude Code as a library, which authenticates
+ * itself against the operator's subscription.
+ */
+export type ModelTransport = "api" | "agent-sdk";
+
 export interface EscalationChannel {
   readonly type: "github-issue";
   readonly assignee: string;
@@ -57,6 +64,7 @@ export interface OperatingSettings {
   /** A ceiling on the reviewer's share of the host cap, never a raise above it (R-019). */
   readonly maxConcurrentReviews: number;
   readonly modelEffort: ModelEffort;
+  readonly modelTransport: ModelTransport;
 }
 
 export interface LoadedSettings {
@@ -103,10 +111,15 @@ const schema = JSON.parse(readFileSync(SCHEMA_URL, "utf8")) as SchemaShape &
 export const REQUIRED_SETTING_KEYS: readonly string[] = schema.$defs.reviewServiceSettings.required;
 
 /** The two settings whose absence is filled from the documented default instead (FR-054). */
-export const OPTIONAL_SETTING_PATHS = ["modelEffort", "escalationChannel.label"] as const;
+export const OPTIONAL_SETTING_PATHS = [
+  "modelEffort",
+  "modelTransport",
+  "escalationChannel.label",
+] as const;
 
 const DEFAULTS = {
   modelEffort: schema.$defs.reviewServiceSettings.properties["modelEffort"]?.default,
+  modelTransport: schema.$defs.reviewServiceSettings.properties["modelTransport"]?.default,
   escalationLabel:
     schema.$defs.reviewServiceSettings.properties.escalationChannel.properties.label.default,
 } as const;
@@ -197,6 +210,7 @@ export function validateSettings(raw: unknown): LoadedSettings {
 
   const channel = section["escalationChannel"] as Record<string, unknown>;
   const modelEffort = (section["modelEffort"] ?? DEFAULTS.modelEffort) as ModelEffort;
+  const modelTransport = (section["modelTransport"] ?? DEFAULTS.modelTransport) as ModelTransport;
   const label = (channel["label"] ?? DEFAULTS.escalationLabel) as string;
 
   const settings: OperatingSettings = {
@@ -220,12 +234,17 @@ export function validateSettings(raw: unknown): LoadedSettings {
       label,
     },
     modelEffort,
+    modelTransport,
   };
 
   return {
     settings,
     host: { maxConcurrentAgents: host["maxConcurrentAgents"] as number },
-    effectiveOptionalSettings: { modelEffort, "escalationChannel.label": label },
+    effectiveOptionalSettings: {
+      modelEffort,
+      modelTransport,
+      "escalationChannel.label": label,
+    },
   };
 }
 
