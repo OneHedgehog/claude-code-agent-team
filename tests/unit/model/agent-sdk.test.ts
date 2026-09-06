@@ -555,7 +555,12 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     const harness = thenAnswers("not json", WELL_FORMED);
     const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
 
-    expect(response.usage).toEqual({ inputTokens: 1_000, outputTokens: 50 });
+    expect(response.usage).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 50,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("gives up after the second miss rather than asking forever", async () => {

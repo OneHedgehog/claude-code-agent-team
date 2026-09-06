@@ -19,6 +19,7 @@ import {
   type ReviewRequest,
   type ReviewResponse,
   CHARS_PER_TOKEN,
+  ZERO_USAGE,
 } from "./client.js";
 
 /**
@@ -260,7 +261,7 @@ export class AgentSdkModelClient implements ModelClient {
       cacheReadTokens: 0,
     };
 
-    let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+    let spent: ModelUsage = ZERO_USAGE;
 
     // The wall-clock bound covers the whole review rather than each ask, so a retry consumes the
     // remainder. Creating the controller inside `#ask` gave a retried review two full budgets,
@@ -459,11 +460,19 @@ export class AgentSdkModelClient implements ModelClient {
   }
 }
 
-/** Two usages summed, so a retried review reports what both attempts cost (FR-073). */
+/**
+ * Two usages summed, so a retried review reports what both attempts cost (FR-073).
+ *
+ * All four fields, not the two that existed when the retry was written: `totalTokens` sums the
+ * cache counters too, and adding only input and output here would have lost the cached half of
+ * every retried review — the same double-entry mistake as folding, one function over.
+ */
 function add(a: ModelUsage, b: ModelUsage): ModelUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
   };
 }
 
