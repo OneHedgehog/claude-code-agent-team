@@ -19,7 +19,7 @@ import { InMemoryLedgerStore, createLedger } from "../../src/ledger/tokens.js";
 import { validateSettings, type LoadedSettings } from "../../src/config/settings.js";
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
-import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
+import { ZERO_USAGE, type ModelClient, type ReviewResponse } from "../../src/model/client.js";
 import { AgentSdkModelClient, type AgentQuery } from "../../src/model/agent-sdk.js";
 
 /**
@@ -105,7 +105,7 @@ function stubs(calls: Calls, overrides: Partial<ComposeOptions> = {}): ComposeOp
         verdict: "approve",
         findings: [],
         replyJudgements: [],
-        usage: { inputTokens: 100, outputTokens: 50, cacheWriteTokens: 0, cacheReadTokens: 0 },
+        usage: { ...ZERO_USAGE, inputTokens: 100, outputTokens: 50 },
       }),
   };
 
@@ -362,7 +362,7 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
           verdict: "approve",
           findings: [],
           replyJudgements: [],
-          usage: { inputTokens: 10, outputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0 },
+          usage: { ...ZERO_USAGE, inputTokens: 10, outputTokens: 10 },
         });
       },
     };

@@ -6,7 +6,6 @@ import {
   HARNESS_FELL_BACK_TO_METERED,
   HARNESS_LIMIT_REACHED,
   HARNESS_NOT_AUTHENTICATED,
-  add,
   scopedEnvironment,
   type AgentQuery,
 } from "../../../src/model/agent-sdk.js";
@@ -480,7 +479,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
 
 describe("a reply that misses the schema is asked again, once (spec 004)", () => {
   /** Answers with `first` on the opening ask and `second` afterwards, recording every prompt. */
-  function thenAnswers(first: string, second: string) {
+  function thenAnswers(first: string, second: string, usage?: Record<string, number>) {
     const prompts: string[] = [];
     const fn = (input: { prompt: unknown }) => {
       prompts.push(String(input.prompt));
@@ -492,7 +491,7 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
         yield {
           type: "result",
           subtype: "success",
-          usage: { input_tokens: 500, output_tokens: 25 },
+          usage: usage ?? { input_tokens: 500, output_tokens: 25 },
         };
       })();
     };
@@ -552,20 +551,31 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     expect(harness.prompts[1]).not.toContain("not json");
   });
 
-  it("sums every field of ModelUsage, so a new one cannot be dropped silently", () => {
+  it("sums every field of usage across attempts, so a new one cannot be dropped silently", async () => {
     // Twice now a change to `ModelUsage` and a change to this transport have been written on
-    // separate branches and disagreed about usage arithmetic — folding cached tokens into input,
-    // then summing only two of four fields when charging a retry. Both were caught by the
-    // compiler at rebase time and by nothing else. This keys on the shape rather than on a list,
-    // so the next field added fails here instead of being quietly lost.
-    const left = { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3, cacheReadTokens: 4 };
-    const right = { inputTokens: 10, outputTokens: 20, cacheWriteTokens: 30, cacheReadTokens: 40 };
-    const summed = add(left, right) as unknown as Record<string, number>;
+    // separate branches and disagreed about usage arithmetic — cached tokens folded into input,
+    // then a retry charged on two of four fields. Both were caught by the compiler at rebase time
+    // and by nothing else.
+    //
+    // Asserted through `review()` rather than against the helper directly, so the invariant is
+    // pinned without a module-private function becoming exported for a test's sake.
+    const both = {
+      input_tokens: 5,
+      output_tokens: 7,
+      cache_creation_input_tokens: 11,
+      cache_read_input_tokens: 13,
+    };
+    const harness = thenAnswers("not json", WELL_FORMED, both);
 
-    expect(Object.keys(summed).sort()).toEqual(Object.keys(left).sort());
-    for (const field of Object.keys(left) as (keyof typeof left)[]) {
-      expect(summed[field]).toBe(left[field] + right[field]);
-    }
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    // Every field doubled: two attempts, each reporting the same non-zero usage.
+    expect(response.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 14,
+      cacheWriteTokens: 22,
+      cacheReadTokens: 26,
+    });
   });
 
   it("charges both attempts, since both were spent", async () => {
