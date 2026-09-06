@@ -122,7 +122,7 @@ export interface AgentSdkOptions {
    */
   readonly onRefusedTool?: (toolName: string) => void;
   /** Told when a reply missed the schema and the harness is being asked again (FR-069). */
-  readonly onSchemaRetry?: (attempt: number, role: string) => void;
+  readonly onSchemaRetry?: (attempt: number, role: ReviewRequest["role"]) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
   readonly env?: Record<string, string | undefined>;
   /** How long the harness may take. Overridden by tests so a deadline case need not wait minutes. */
@@ -218,7 +218,7 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #query: AgentQuery;
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
-  readonly #onSchemaRetry: ((attempt: number, role: string) => void) | undefined;
+  readonly #onSchemaRetry: ((attempt: number, role: ReviewRequest["role"]) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
   readonly #deadlineMs: number;
 
@@ -289,9 +289,13 @@ export class AgentSdkModelClient implements ModelClient {
           // would be spending against a budget that is already gone.
           if (attempt >= MAX_ATTEMPTS || abort.signal.aborted || !isSchemaViolation(error)) {
             // Wrapped either way, so a first attempt's tokens are not lost because the second
-            // failed in an unexpected shape. Rethrowing the raw error discarded `spent`, and every
-            // attempt is charged because every attempt was spent (FR-073).
-            throw new ModelError(error instanceof Error ? error.message : String(error), spent);
+            // failed in an unexpected shape (FR-073) -- but `cause` carries the original, because
+            // the wrap otherwise makes every failure leaving here a bare `ModelError` whose stack
+            // points at this line rather than at the failure site. On the unexpected arms, which
+            // are exactly the ones a reader would be debugging, that was the whole diagnostic.
+            throw new ModelError(error instanceof Error ? error.message : String(error), spent, {
+              cause: error,
+            });
           }
 
           this.#onSchemaRetry?.(attempt, request.role);

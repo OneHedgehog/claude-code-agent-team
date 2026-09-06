@@ -635,7 +635,7 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
               // Attributable rather than merely counted: the rate is the argument for the feature,
               // and a number an operator cannot pin to a role tells them less than one they can.
               // The pull request and revision reach the record through the run's own fields.
-              role: role as "security" | "implementation",
+              role,
             }),
         })
       : modelCredential === null

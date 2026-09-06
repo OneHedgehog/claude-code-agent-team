@@ -594,10 +594,15 @@ describe("what the root wires to the real adapter (Principle II)", () => {
     const records: string[] = [];
     const logger = createLogger({ runId: "run-retry", write: (line) => records.push(line) });
 
-    let asks = 0;
-    const agentQuery = (() => {
-      asks += 1;
-      const text = asks % 2 === 1 ? "not json at all" : APPROVING_JSON;
+    // Keyed on what each ask carries, not on a shared counter: parity across both roles is only
+    // correct while the two reviews run strictly sequentially at two asks each, and a role that
+    // received well-formed JSON first would fail this test for a reason unrelated to the wiring.
+    const agentQuery = ((input: { prompt: unknown }) => {
+      const prompt = String(input.prompt);
+      // The retry appends its correction, so the second ask is distinguishable from the first
+      // whatever order the roles run in.
+      const isRetry = prompt.includes("did not validate against the schema");
+      const text = isRetry ? APPROVING_JSON : "not json at all";
 
       // eslint-disable-next-line @typescript-eslint/require-await
       return (async function* () {
