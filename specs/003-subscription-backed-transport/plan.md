@@ -64,8 +64,9 @@ the waiver; it is recorded here rather than left implicit.
 
 `ReviewRequest.maxTokens` has no equivalent in the harness — `maxTurns` bounds the conversation,
 `maxBudgetUsd` bounds money, `maxThinkingTokens` is deprecated and bounds only thinking. Rather than
-accept the field and silently ignore it, FR-061 states the limitation: on this transport a review is
-bounded by one turn and by the budget check that authorised it, not by an output ceiling.
+accept the field and silently ignore it, FR-061 states the limitation: a review here is bounded by
+one turn, by the wall-clock deadline of FR-066, and by the budget check that authorised it — not by
+an output ceiling.
 
 ## What the harness actually needs, measured
 

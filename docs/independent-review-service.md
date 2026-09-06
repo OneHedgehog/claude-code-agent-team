@@ -228,12 +228,17 @@ harness runs as an ordinary child process — no container, no resource limit, n
 of our own. So the three refusals are the control and are load-bearing rather than redundant, which
 is why one of them (`canUseTool`) does not depend on the SDK's option semantics at all. Recorded in
 [specs/003](../specs/003-subscription-backed-transport/spec.md) under "What this feature does not
-contain". The child's environment is an allowlist — `PATH`, `HOME`, `USER` and
-a few encoding and scratch variables — rather than the orchestrator's own, which carries the GitHub
-App key, the installation token, and `ANTHROPIC_API_KEY`. The two Anthropic credential names are
-passed **present and empty** rather than dropped, so the neutralisation holds whether the SDK
-replaces the child's environment or merges over the parent's; `USER` is in the list because without
-it the harness does not reach the subscription at all. That last one is not hardening: this transport
+contain". The child's environment is an allowlist — `PATH`, `HOME`, `USER`, `CLAUDE_CONFIG_DIR` and three
+encoding and scratch variables — rather than the orchestrator's own, which carries the GitHub App
+key, the installation token, and `ANTHROPIC_API_KEY`. `USER` is in the list because without it the
+harness does not reach the subscription at all.
+
+The two Anthropic credential names are passed **present and empty** rather than dropped, so *those
+two* are neutralised whether the SDK replaces the child's environment or merges over the parent's.
+Everything else — the App key included — is withheld by replacement alone, which was measured rather
+than assumed and is pinned to one SDK version. [specs/003](../specs/003-subscription-backed-transport/spec.md)
+records that residual under "What this feature does not contain", so an upgrade has something to
+invalidate. That last one is not hardening: this transport
 exists because the credits behind that key ran out, and a harness that inherited and preferred it
 would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
 while the record claimed otherwise (FR-063).

@@ -115,9 +115,45 @@ rather than in `docs/`, which is rewritten whenever operations change.
 - **FR-065**: A harness refusal for a session or rate limit MUST fail closed as a missing verdict,
   like any other model failure (FR-007), and MUST be legible as what it is rather than folded into a
   generic call failure — the same obligation `HARNESS_NOT_AUTHENTICATED` discharges for an
-  unauthenticated host.
-- Principle IV's rule is unchanged and applies identically here: an agent MUST NOT resolve the
-  limit by spending or by weakening the gate. The system degrades to stopped.
+  unauthenticated host. Principle IV applies identically: an agent MUST NOT resolve the limit by
+  spending or by weakening the gate. The system degrades to stopped.
+
+## What this feature does not contain
+
+The harness runs as an ordinary child process: no container, no CPU or memory limit, no egress
+restriction beyond the harness's own. Principle V asks for containment enforced by the execution
+environment — *"a filesystem scope limited to its own checkout and toolchain"* — and the repository
+already parks that behind a spike. This feature is the first subprocess to sit in that gap, recorded
+here rather than left to be inferred.
+
+**`cwd` is not a filesystem scope.** It sets where relative paths resolve and nothing more. Absolute
+paths are unaffected, and `HOME` is deliberately reachable because the subscription credential lives
+there. So if the three tool refusals turned out to mean less than they read, the fallback is not "a
+directory holding nothing" — it is the host, entered from an empty directory.
+
+The consequence is that **the refusals in FR-058 are load-bearing rather than redundant**. That is
+why there are three of them, one of which (`canUseTool`) is independent of the SDK's option
+semantics entirely and records what it refused. A reader should treat `cwd` as tidiness and the
+refusals as the control.
+
+**The allowlist rests on replacement semantics.** The two Anthropic credential names are neutralised
+under either reading, because they are passed present and empty (FR-063). Nothing else is: every
+other value withheld from the child — the GitHub App private key, the installation token, whatever
+else is in `process.env` — is withheld because the SDK *replaces* the child's environment rather
+than merging over the parent's. That was measured at `@anthropic-ai/claude-agent-sdk@0.3.261`, and
+`package.json` declares `^0.3.261`, so an in-range upgrade could move it with nothing failing. The
+empty-value trick cannot be extended to an open set of names; this sentence exists so a future
+upgrade has something to invalidate rather than a silent regression.
+
+## The subscription has its own exhaustion mode
+
+Not hypothetical: rounds 4 and 7 of this feature's own review each produced no verdict from a
+reviewer because the harness answered `You've hit your session limit`.
+
+This matters because the feature's premise is that a metered balance running out closed the gate,
+and the subscription route removes that dependency. It removes *that* limit and introduces a
+different one. A session limit and an exhausted credit balance are different failures with the same
+shape: the reviewer cannot run, the run reports a missing verdict, and the gate fails closed.
 
 **What this does not do** is restore the property the API transport lost. Neither route is immune to
 its own funding running out; `agent-sdk` was adopted because one balance was already exhausted and
