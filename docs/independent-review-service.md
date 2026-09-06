@@ -243,6 +243,18 @@ exists because the credits behind that key ran out, and a harness that inherited
 would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
 while the record claimed otherwise (FR-063).
 
+**A reply that misses the schema is asked for once more** ([spec 004](../specs/004-schema-retry/spec.md)). The API transport makes malformed
+output impossible; this one only rejects it, and the observed rejection rate was high enough to lose
+roughly a third of role-calls — which, since a gate needs both roles to comply at once, failed more
+rounds than it passed. The second ask says the first reply was discarded and repeats the schema; it
+does not carry the rejected reply back. Nothing else is retried: an unauthenticated host, a
+subscription limit, a deadline and a refused tool are states a second identical ask cannot improve.
+Both attempts are charged, and both share one wall-clock bound rather than each getting a fresh
+one. Every retry emits `model.schema_retry`, carrying the attempt index in `attempt` — not `round`,
+which means the review round everywhere else — and the role that hit it. That record is the number
+to watch: a rate climbing over time is this transport's disclosed weakness getting worse. This
+narrows the gap between the transports rather than closing it.
+
 A harness that authenticates against the metered API balance instead of the subscription — the
 failure FR-063 exists to prevent — says so by name rather than arriving as a generic call failure.
 That is the premise of this transport ceasing to hold, and it should be visible at the moment it

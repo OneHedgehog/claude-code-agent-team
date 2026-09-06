@@ -103,8 +103,15 @@ export class ModelError extends Error {
   /** Tokens consumed before the failure, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
 
-  constructor(message: string, usage: ModelUsage = { inputTokens: 0, outputTokens: 0 }) {
-    super(message);
+  constructor(
+    message: string,
+    usage: ModelUsage = { inputTokens: 0, outputTokens: 0 },
+    options?: { cause?: unknown },
+  ) {
+    // `cause` is carried so a wrapped failure keeps the site it came from. A retry has to wrap in
+    // order to attach the accumulated spend, and without this every failure leaving the loop was a
+    // bare error whose stack pointed at the wrap rather than at what broke.
+    super(message, options);
     this.usage = usage;
   }
 }

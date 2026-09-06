@@ -39,6 +39,7 @@ export const REVIEW_EVENTS = [
   "finding.resolved",
   "location.rejected",
   "tool.refused",
+  "model.schema_retry",
   "finding.waiver_requested",
   "roles.contradiction_recorded",
   "roles.disagreement_escalated",
@@ -57,6 +58,11 @@ export interface RecordFields {
   readonly pullRequest?: number;
   readonly revision?: string;
   readonly round?: number;
+  /**
+   * Which ask of a model call this is, for `model.schema_retry`. Distinct from `round`, which means
+   * the review round -- an attempt index filed there would read as one (FR-075).
+   */
+  readonly attempt?: number;
   readonly state?: string;
   readonly role?: "security" | "implementation";
   readonly verdict?: "approve" | "request-changes";

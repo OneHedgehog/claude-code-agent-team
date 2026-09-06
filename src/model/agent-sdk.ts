@@ -10,6 +10,7 @@ import {
   REVIEW_MODEL,
   REVIEW_RESPONSE_SCHEMA,
   type RejectedLocation,
+  type ReviewPrompt,
 } from "./anthropic.js";
 import {
   ModelError,
@@ -34,6 +35,24 @@ import {
 
 /** The single turn a review takes. There is no loop here: one question, one answer, no tools. */
 const MAX_TURNS = 1;
+
+/**
+ * How many times the harness is asked before the review is recorded as having no verdict.
+ *
+ * The API transport made a schema violation impossible; this one makes it rejected, and the
+ * observed rejection rate is high enough that a single attempt loses roughly a third of role-calls
+ * (FR-069). One retry is the difference between a gate that passes when both roles happen to comply
+ * and one that passes routinely. Two, not more: a model that misses the schema twice given the
+ * schema and its own failure is not going to be talked round by a third ask, and every attempt
+ * spends.
+ */
+const MAX_ATTEMPTS = 2;
+
+/** What the retry adds, so the second ask is better informed than a repetition of the first. */
+const SCHEMA_CORRECTION =
+  "Your previous reply did not validate against the schema and was discarded. Reply again with a " +
+  "single JSON object matching it exactly -- no prose, no code fence, no properties the schema " +
+  "does not name, and every required property present.";
 
 /** The wall-clock bound, and what it costs an operator: FR-066. */
 const DEADLINE_MS = 15 * 60 * 1000;
@@ -102,6 +121,8 @@ export interface AgentSdkOptions {
    * if it does, a reviewed diff persuaded a tool-less reviewer to reach for a tool (FR-024).
    */
   readonly onRefusedTool?: (toolName: string) => void;
+  /** Told when a reply missed the schema and the harness is being asked again (FR-069). */
+  readonly onSchemaRetry?: (attempt: number, role: ReviewRequest["role"]) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
   readonly env?: Record<string, string | undefined>;
   /** How long the harness may take. Overridden by tests so a deadline case need not wait minutes. */
@@ -197,6 +218,7 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #query: AgentQuery;
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
+  readonly #onSchemaRetry: ((attempt: number, role: ReviewRequest["role"]) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
   readonly #deadlineMs: number;
 
@@ -204,6 +226,7 @@ export class AgentSdkModelClient implements ModelClient {
     this.#query = options.agentQuery ?? query;
     this.#onRejectedLocation = options.onRejectedLocation;
     this.#onRefusedTool = options.onRefusedTool;
+    this.#onSchemaRetry = options.onSchemaRetry;
     this.#env = options.env ?? process.env;
     this.#deadlineMs = options.deadlineMs ?? DEADLINE_MS;
   }
@@ -231,15 +254,71 @@ export class AgentSdkModelClient implements ModelClient {
       outputTokens: 0,
     };
 
+    let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+
+    // The wall-clock bound covers the whole review rather than each ask, so a retry consumes the
+    // remainder. Creating the controller inside `#ask` gave a retried review two full budgets,
+    // which silently doubled the fifteen minutes FR-066 promises an operator.
+    const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
+
+    try {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          const response = await this.#ask(
+            request,
+            prompt,
+            // The second ask carries the schema and the first reply's fate, and nothing from the
+            // reply itself -- prose fed back as context is prose invited again.
+            attempt === 1 ? sent : `${sent}\n\n${SCHEMA_CORRECTION}`,
+            floor,
+            abort,
+          );
+
+          return { ...response, usage: add(spent, response.usage) };
+        } catch (error) {
+          const usage = error instanceof ModelError ? error.usage : floor;
+          spent = add(spent, usage);
+
+          // Only a schema violation is worth asking again. An unauthenticated host, a subscription
+          // limit, a deadline and a refused tool are all states a second identical ask cannot
+          // improve, and retrying a limit makes it worse (FR-069).
+          //
+          // The deadline is checked explicitly as well as through the predicate, because the bound
+          // is shared: once it has fired there is no remainder to retry into, and a second ask
+          // would be spending against a budget that is already gone.
+          if (attempt >= MAX_ATTEMPTS || abort.signal.aborted || !isSchemaViolation(error)) {
+            // Wrapped either way, so a first attempt's tokens are not lost because the second
+            // failed in an unexpected shape (FR-073) -- but `cause` carries the original, because
+            // the wrap otherwise makes every failure leaving here a bare `ModelError` whose stack
+            // points at this line rather than at the failure site. On the unexpected arms, which
+            // are exactly the ones a reader would be debugging, that was the whole diagnostic.
+            throw new ModelError(error instanceof Error ? error.message : String(error), spent, {
+              cause: error,
+            });
+          }
+
+          this.#onSchemaRetry?.(attempt, request.role);
+        }
+      }
+    } finally {
+      clearTimeout(deadline);
+    }
+  }
+
+  /** One ask, from spawning the harness to a validated response. Retried only on FR-069. */
+  async #ask(
+    request: ReviewRequest,
+    prompt: ReviewPrompt,
+    sent: string,
+    floor: ModelUsage,
+    abort: AbortController,
+  ): Promise<ReviewResponse> {
     let text = "";
     // `null`, not a zeroed total: "never said" and "said nothing was spent" are different (FR-062).
     let usage: ModelUsage | null = null;
 
     const scratch = mkdtempSync(join(tmpdir(), "independent-review-"));
-
-    // Cancels rather than abandons: an orphaned subprocess keeps spending with nobody reading it.
-    const abort = new AbortController();
-    const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
 
     // Why the harness stopped, when it says. Otherwise a truncated run reads as malformed JSON.
     let resultSubtype: string | null = null;
@@ -313,7 +392,6 @@ export class AgentSdkModelClient implements ModelClient {
         usage ?? floor,
       );
     } finally {
-      clearTimeout(deadline);
       // Best effort. An orphaned empty directory under the system temp root is a smaller problem
       // than a review that failed because its scratch space could not be removed.
       rmSync(scratch, { recursive: true, force: true });
@@ -355,6 +433,15 @@ export class AgentSdkModelClient implements ModelClient {
       throw new ModelError("harness reported no usage; the review cannot be metered", floor);
     }
 
+    if (text.trim() === "") {
+      // Distinct from a schema violation, and deliberately not retried (FR-072). A turn that ended
+      // normally and said nothing is a harness malfunction rather than a model formatting slip, and
+      // without this check the empty string reached the parser, came back as "did not satisfy the
+      // review schema", and was asked again -- spending a second time on the one shape a second ask
+      // cannot improve. `AnthropicModelClient` has carried this check all along.
+      throw new ModelError("model response carried no text content", usage);
+    }
+
     // The spread is not redundant, though it reads that way: `parseReviewResponse` returns
     // `Omit<ReviewResponse, "usage">` and takes `usage` only to attach it to the `ModelError` it
     // may throw. The parser never carries it through on the success path, so this is where the
@@ -364,6 +451,32 @@ export class AgentSdkModelClient implements ModelClient {
       usage,
     };
   }
+}
+
+/** Two usages summed, so a retried review reports what both attempts cost (FR-073). */
+function add(a: ModelUsage, b: ModelUsage): ModelUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}
+
+/**
+ * Whether a failure was the model missing the schema, rather than anything a retry cannot mend.
+ *
+ * Keyed on the parser's own message rather than on an error subclass, because `parseReviewResponse`
+ * is shared with the API transport and giving it a new error type would change that path too. The
+ * cost of getting this wrong is bounded in the safe direction: a miscategorised failure is asked
+ * once more and then reported exactly as it would have been.
+ */
+function isSchemaViolation(error: unknown): boolean {
+  // Deliberately the two genuine parse failures and nothing else. `carried no text content` was
+  // here and is not one: an empty response is what a harness killed at the deadline or interrupted
+  // by a refused tool can produce, and routing those into a second ask is what FR-072 forbids.
+  return (
+    error instanceof ModelError &&
+    /(did not satisfy the review schema|was not JSON)/.test(error.message)
+  );
 }
 
 /**

@@ -465,6 +465,256 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 });
 
+describe("a reply that misses the schema is asked again, once (spec 004)", () => {
+  /** Answers with `first` on the opening ask and `second` afterwards, recording every prompt. */
+  function thenAnswers(first: string, second: string) {
+    const prompts: string[] = [];
+    const fn = (input: { prompt: unknown }) => {
+      prompts.push(String(input.prompt));
+      const text = prompts.length === 1 ? first : second;
+
+      // eslint-disable-next-line @typescript-eslint/require-await
+      return (async function* () {
+        yield { type: "assistant", message: { content: [{ type: "text", text }] } };
+        yield {
+          type: "result",
+          subtype: "success",
+          usage: { input_tokens: 500, output_tokens: 25 },
+        };
+      })();
+    };
+
+    return Object.assign(fn, { prompts }) as unknown as AgentQuery & { prompts: string[] };
+  }
+
+  it("recovers a review whose first reply was prose", async () => {
+    // The API transport made this impossible through `output_config.format`. Here it is merely
+    // rejected — at a rate high enough that a single ask lost roughly a third of role-calls, and
+    // a green gate needs both roles to comply at once.
+    const harness = thenAnswers("I reviewed it and it looks fine.", WELL_FORMED);
+
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.verdict).toBe("request-changes");
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("recovers a review whose first reply was well-formed JSON of the wrong shape", async () => {
+    // The dominant case in production, and the one the other tests miss: they all feed prose, which
+    // takes the `was not JSON` arm. `must NOT have additional properties` and `must have required
+    // property 'path'` are what actually cost a third of role-calls, and they are valid JSON.
+    const wrongShape = JSON.stringify({
+      findings: [{ rule: "r", severity: "high", blocking: true, description: "d", extra: "no" }],
+      verdict: "request-changes",
+      replyJudgements: [],
+    });
+    const harness = thenAnswers(wrongShape, WELL_FORMED);
+
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.verdict).toBe("request-changes");
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("reports the retry, since it is the only number saying the weakness is getting worse", async () => {
+    const attempts: string[] = [];
+    const harness = thenAnswers("not json", WELL_FORMED);
+
+    await new AgentSdkModelClient({
+      agentQuery: harness,
+      onSchemaRetry: (attempt, role) => attempts.push(`${role}:${attempt}`),
+    }).review(request());
+
+    // Attributable, not merely counted: an operator watching the rate needs to know whose it is.
+    expect(attempts).toEqual(["security:1"]);
+  });
+
+  it("tells the model its reply was discarded, rather than repeating the question", async () => {
+    const harness = thenAnswers("not json", WELL_FORMED);
+    await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(harness.prompts[1]).toContain("did not validate against the schema");
+    // And carries none of the rejected reply back: a model that emitted prose must not be handed
+    // its own prose as context.
+    expect(harness.prompts[1]).not.toContain("not json");
+  });
+
+  it("charges both attempts, since both were spent", async () => {
+    const harness = thenAnswers("not json", WELL_FORMED);
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.usage).toEqual({ inputTokens: 1_000, outputTokens: 50 });
+  });
+
+  it("gives up after the second miss rather than asking forever", async () => {
+    const harness = thenAnswers("not json", "still not json");
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: harness }).review(request()),
+    ).rejects.toThrow(ModelError);
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("shares one deadline across both attempts rather than granting the retry a fresh one", async () => {
+    // Asserted on the controller's identity, not on the clock. A timing test cannot tell the two
+    // apart: with a fresh controller per ask, the first ask still returns, the second still aborts,
+    // and the same error still throws — which is how the version of this test written alongside the
+    // fix passed against the very regression the fix was for.
+    //
+    // One bound means one controller. FR-066 promises fifteen minutes for a review; a controller
+    // created inside the ask gave a retried review two of them.
+    const seen: (AbortController | undefined)[] = [];
+    let asks = 0;
+
+    const slow = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) => {
+        asks += 1;
+        seen.push(input.options?.abortController);
+        const text = asks === 1 ? "not json" : WELL_FORMED;
+
+        // eslint-disable-next-line @typescript-eslint/require-await
+        return (async function* () {
+          yield { type: "assistant", message: { content: [{ type: "text", text }] } };
+          yield {
+            type: "result",
+            subtype: "success",
+            usage: { input_tokens: 10, output_tokens: 1 },
+          };
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await new AgentSdkModelClient({ agentQuery: slow }).review(request());
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeDefined();
+    // The whole assertion: the retry was handed the bound the first ask was already counting
+    // against, not one of its own.
+    expect(seen[1]).toBe(seen[0]);
+  });
+
+  it("does not ask again once the bound has expired, since there is no remainder to ask into", async () => {
+    let asks = 0;
+    const expired = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield
+        return (async function* () {
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+          throw new Error("aborted");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: expired, deadlineMs: 25 }).review(request()),
+    ).rejects.toThrow(/did not answer within/);
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry a refused tool: an empty reply after an interrupt is not a schema miss", async () => {
+    // The predicate was broad enough to catch `carried no text content`, which is what an
+    // interrupted harness produces — routing the most security-relevant event this transport has
+    // straight back into a second ask.
+    let asks = 0;
+    const seeking = Object.assign(
+      (input: {
+        options?: {
+          canUseTool?: (n: string, i: Record<string, unknown>, o: unknown) => Promise<unknown>;
+        };
+      }) => {
+        asks += 1;
+
+        return (async function* () {
+          await input.options?.canUseTool?.("Bash", {}, {});
+          yield { type: "result", subtype: "error_during_execution", usage: undefined };
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: seeking }).review(request()),
+    ).rejects.toThrow(/attempted to use a tool/);
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry a reply that carried no text at all", async () => {
+    // `carried no text content` was in the predicate and was deliberately taken out: an empty
+    // reply is what an interrupted or deadline-killed harness produces, and matching it would
+    // route a refused tool straight back into a second ask (FR-072). Pinned directly, so a future
+    // change that widens the predicate back toward absence-of-content fails here.
+    let asks = 0;
+    const silent = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line @typescript-eslint/require-await
+        return (async function* () {
+          yield {
+            type: "result",
+            subtype: "success",
+            usage: { input_tokens: 100, output_tokens: 1 },
+          };
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: silent }).review(request())).rejects.toThrow(
+      ModelError,
+    );
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry an unauthenticated host", async () => {
+    let asks = 0;
+    const unauth = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        return (async function* () {
+          throw new Error("401 Unauthorized");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: unauth }).review(request())).rejects.toThrow(
+      HARNESS_NOT_AUTHENTICATED,
+    );
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry a subscription limit, which a second ask only makes worse", async () => {
+    // The point of the predicate. An unauthenticated host, a limit, a deadline and a refused tool
+    // are all states an identical second ask cannot improve.
+    let asks = 0;
+    const limited = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        return (async function* () {
+          throw new Error("You've hit your session limit");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: limited }).review(request()),
+    ).rejects.toThrow(HARNESS_LIMIT_REACHED);
+    expect(asks).toBe(1);
+  });
+});
+
 describe("extractJson widens what is accepted, never what is trusted", () => {
   it("takes the object out of a fenced block", () => {
     expect(extractJson('```json\n{"verdict":"approve"}\n```')).toEqual({ verdict: "approve" });

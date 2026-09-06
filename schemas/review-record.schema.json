@@ -47,6 +47,7 @@
         "finding.resolved",
         "location.rejected",
         "tool.refused",
+        "model.schema_retry",
         "finding.waiver_requested",
         "roles.contradiction_recorded",
         "roles.disagreement_escalated",
@@ -113,6 +114,11 @@
       "description": "Optional settings and the values actually applied, whether supplied or filled from the documented default, so that no behavior depends on a value nobody can see (FR-054).",
       "type": "object",
       "additionalProperties": true
+    },
+    "attempt": {
+      "description": "Which ask of a model call this is, for model.schema_retry. Distinct from round, which means the review round (FR-075).",
+      "type": "integer",
+      "minimum": 1
     },
     "location": {
       "description": "A location the model produced that was refused and downgraded to pull-request level (Principle VII).",
