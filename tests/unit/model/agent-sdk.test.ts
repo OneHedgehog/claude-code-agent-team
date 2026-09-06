@@ -644,6 +644,34 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     expect(asks).toBe(1);
   });
 
+  it("does not retry a reply that carried no text at all", async () => {
+    // `carried no text content` was in the predicate and was deliberately taken out: an empty
+    // reply is what an interrupted or deadline-killed harness produces, and matching it would
+    // route a refused tool straight back into a second ask (FR-072). Pinned directly, so a future
+    // change that widens the predicate back toward absence-of-content fails here.
+    let asks = 0;
+    const silent = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line @typescript-eslint/require-await
+        return (async function* () {
+          yield {
+            type: "result",
+            subtype: "success",
+            usage: { input_tokens: 100, output_tokens: 1 },
+          };
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: silent }).review(request())).rejects.toThrow(
+      ModelError,
+    );
+    expect(asks).toBe(1);
+  });
+
   it("does not retry an unauthenticated host", async () => {
     let asks = 0;
     const unauth = Object.assign(

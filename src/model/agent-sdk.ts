@@ -433,6 +433,15 @@ export class AgentSdkModelClient implements ModelClient {
       throw new ModelError("harness reported no usage; the review cannot be metered", floor);
     }
 
+    if (text.trim() === "") {
+      // Distinct from a schema violation, and deliberately not retried (FR-072). A turn that ended
+      // normally and said nothing is a harness malfunction rather than a model formatting slip, and
+      // without this check the empty string reached the parser, came back as "did not satisfy the
+      // review schema", and was asked again -- spending a second time on the one shape a second ask
+      // cannot improve. `AnthropicModelClient` has carried this check all along.
+      throw new ModelError("model response carried no text content", usage);
+    }
+
     // The spread is not redundant, though it reads that way: `parseReviewResponse` returns
     // `Omit<ReviewResponse, "usage">` and takes `usage` only to attach it to the `ModelError` it
     // may throw. The parser never carries it through on the success path, so this is where the
