@@ -20,7 +20,7 @@ import { validateSettings, type LoadedSettings } from "../../src/config/settings
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import type { ModelClient, ReviewResponse } from "../../src/model/client.js";
-import { AgentSdkModelClient } from "../../src/model/agent-sdk.js";
+import { AgentSdkModelClient, type AgentQuery } from "../../src/model/agent-sdk.js";
 
 /**
  * The composition root, constructed and driven (FR-026, FR-027, tasks.md T135).
@@ -74,6 +74,9 @@ function settingsFor(modelTransport: "api" | "agent-sdk"): LoadedSettings {
 const SETTINGS: LoadedSettings = settingsFor("api");
 
 const HEAD = "c0ffee".padEnd(40, "0");
+
+/** What the scripted harness answers once it has been told its first reply was discarded. */
+const APPROVING_JSON = JSON.stringify({ findings: [], verdict: "approve", replyJudgements: [] });
 
 const DIFF = [
   "diff --git a/src/example.ts b/src/example.ts",
@@ -583,6 +586,51 @@ describe("what the root wires to the real adapter (Principle II)", () => {
       },
     };
   }
+
+  it("records model.schema_retry when the agent transport asks a second time", async () => {
+    // The only path by which the retry reaches the durable record is a lambda in the composition
+    // root, and FR-075 is the one requirement in spec 004 that lives there rather than in the
+    // adapter. Deleting that lambda must fail a test, and this is that test.
+    const records: string[] = [];
+    const logger = createLogger({ runId: "run-retry", write: (line) => records.push(line) });
+
+    let asks = 0;
+    const agentQuery = (() => {
+      asks += 1;
+      const text = asks % 2 === 1 ? "not json at all" : APPROVING_JSON;
+
+      // eslint-disable-next-line @typescript-eslint/require-await
+      return (async function* () {
+        yield { type: "assistant", message: { content: [{ type: "text", text }] } };
+        yield {
+          type: "result",
+          subtype: "success",
+          usage: { input_tokens: 100, output_tokens: 10 },
+        };
+      })();
+    }) as unknown as AgentQuery;
+
+    const { model: _unused, ...withoutModel } = stubs(emptyCalls(), {
+      logger,
+      settings: settingsFor("agent-sdk"),
+    });
+    const adapters = await composeService({
+      ...withoutModel,
+      agentQuery,
+      graphqlClient: noThreads(),
+    });
+
+    await reviewPullRequest(adapters, 7, { runId: "run-retry" });
+
+    const retries = records
+      .map((line) => JSON.parse(line) as { event: string; attempt?: number })
+      .filter((record) => record.event === "model.schema_retry");
+
+    // One per role: each is asked twice, and each reports the first ask as the one that missed.
+    expect(retries).toHaveLength(2);
+    // Under `attempt`, not `round` -- `round` means the review round everywhere else.
+    expect(retries[0]?.attempt).toBe(1);
+  });
 
   it("records location.rejected when the real adapter refuses a path", async () => {
     // Substituting `model` would test neither the adapter nor this wiring. Deleting the

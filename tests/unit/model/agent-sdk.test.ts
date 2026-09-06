@@ -499,6 +499,35 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     expect(harness.prompts).toHaveLength(2);
   });
 
+  it("recovers a review whose first reply was well-formed JSON of the wrong shape", async () => {
+    // The dominant case in production, and the one the other tests miss: they all feed prose, which
+    // takes the `was not JSON` arm. `must NOT have additional properties` and `must have required
+    // property 'path'` are what actually cost a third of role-calls, and they are valid JSON.
+    const wrongShape = JSON.stringify({
+      findings: [{ rule: "r", severity: "high", blocking: true, description: "d", extra: "no" }],
+      verdict: "request-changes",
+      replyJudgements: [],
+    });
+    const harness = thenAnswers(wrongShape, WELL_FORMED);
+
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.verdict).toBe("request-changes");
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("reports the retry, since it is the only number saying the weakness is getting worse", async () => {
+    const attempts: number[] = [];
+    const harness = thenAnswers("not json", WELL_FORMED);
+
+    await new AgentSdkModelClient({
+      agentQuery: harness,
+      onSchemaRetry: (attempt) => attempts.push(attempt),
+    }).review(request());
+
+    expect(attempts).toEqual([1]);
+  });
+
   it("tells the model its reply was discarded, rather than repeating the question", async () => {
     const harness = thenAnswers("not json", WELL_FORMED);
     await new AgentSdkModelClient({ agentQuery: harness }).review(request());

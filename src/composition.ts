@@ -626,10 +626,10 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           // Expected never to fire. If it does, a reviewed diff talked a tool-less reviewer into
           // reaching for a tool, and a run that stayed silent about that would be worthless.
           onRefusedTool: (toolName) => logger.warn("tool.refused", { tool: { name: toolName } }),
-          // Recorded because the retry is the difference between a gate that passes routinely and
-          // one that passes when both roles happen to comply; an operator watching the rate climb
-          // is watching this transport's disclosed weakness get worse (FR-075).
-          onSchemaRetry: (attempt) => logger.warn("model.schema_retry", { round: attempt }),
+          // Under its own name, not `round`: `round` means the review round everywhere else in the
+          // record, so filing an attempt index there would make a log query read a retry as a
+          // review round -- and this event exists to be counted (FR-075).
+          onSchemaRetry: (attempt) => logger.warn("model.schema_retry", { attempt }),
         })
       : modelCredential === null
         ? unavailableModel(MISSING_CREDENTIAL_REASON)

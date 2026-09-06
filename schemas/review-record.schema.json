@@ -115,6 +115,11 @@
       "type": "object",
       "additionalProperties": true
     },
+    "attempt": {
+      "description": "Which ask of a model call this is, for model.schema_retry. Distinct from round, which means the review round (FR-075).",
+      "type": "integer",
+      "minimum": 1
+    },
     "location": {
       "description": "A location the model produced that was refused and downgraded to pull-request level (Principle VII).",
       "type": "object",

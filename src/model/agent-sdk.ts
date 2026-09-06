@@ -256,9 +256,9 @@ export class AgentSdkModelClient implements ModelClient {
 
     let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
 
-    // One bound for the whole review, not one per ask. FR-066 promises an operator fifteen minutes;
-    // creating the controller inside `#ask` would have given a retried review two full budgets and
-    // silently doubled the number they schedule around. The retry consumes the remainder.
+    // The wall-clock bound covers the whole review rather than each ask, so a retry consumes the
+    // remainder. Creating the controller inside `#ask` gave a retried review two full budgets,
+    // which silently doubled the fifteen minutes FR-066 promises an operator.
     const abort = new AbortController();
     const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
 
