@@ -118,27 +118,6 @@ rather than in `docs/`, which is rewritten whenever operations change.
   unauthenticated host. Principle IV applies identically: an agent MUST NOT resolve the limit by
   spending or by weakening the gate. The system degrades to stopped.
 
-- **FR-068**: A reply that fails schema validation MUST be asked for once more before the review is
-  recorded as having produced no verdict, and MUST NOT be retried for any other cause.
-
-  FR-059 disclosed that this transport makes a malformed response *rejected* rather than
-  impossible. What it could not disclose was the **rate**: in this feature's own nine review rounds
-  roughly a third of role-calls were lost to schema violations, and because a gate needs both roles
-  to comply on the same revision, more rounds failed than passed for that reason alone. A disclosed
-  weakness that costs a third of throughput is a defect in practice whatever it is in principle.
-
-  The retry is bounded at one further ask. A model that misses the schema twice, given the schema
-  and told its first reply was discarded, is not going to be talked round by a third, and every
-  attempt spends. The second ask carries the correction but **not** the rejected reply: prose fed
-  back as context is prose invited again.
-
-  Only a schema violation is retried. An unauthenticated host, a subscription limit, an expired
-  deadline and a refused tool are states an identical second ask cannot improve, and retrying a
-  limit makes it worse. Both attempts are charged, because both were spent (FR-031).
-
-  This narrows the gap between the transports; it does not close it. `api` still makes malformed
-  output impossible, and `agent-sdk` still fails closed when two asks both miss.
-
 ## What this feature does not contain
 
 The harness runs as an ordinary child process: no container, no CPU or memory limit, no egress
@@ -267,5 +246,3 @@ flip specifically.
   reaches the ledger carrying at least the tokens its prompt cost.
 - **SC-010**: A harness that authenticates against the metered balance instead of the subscription
   fails with a reason naming that specifically, rather than as a generic call failure.
-- **SC-011**: A review whose first reply misses the schema completes on the second ask, charges both
-  attempts, and a test fails if a non-schema failure is retried.

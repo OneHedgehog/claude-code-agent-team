@@ -628,7 +628,7 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           onRefusedTool: (toolName) => logger.warn("tool.refused", { tool: { name: toolName } }),
           // Recorded because the retry is the difference between a gate that passes routinely and
           // one that passes when both roles happen to comply; an operator watching the rate climb
-          // is watching this transport's disclosed weakness get worse (FR-068).
+          // is watching this transport's disclosed weakness get worse (FR-075).
           onSchemaRetry: (attempt) => logger.warn("model.schema_retry", { round: attempt }),
         })
       : modelCredential === null

@@ -465,7 +465,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 });
 
-describe("a reply that misses the schema is asked again, once (FR-068)", () => {
+describe("a reply that misses the schema is asked again, once (spec 004)", () => {
   /** Answers with `first` on the opening ask and `second` afterwards, recording every prompt. */
   function thenAnswers(first: string, second: string) {
     const prompts: string[] = [];
@@ -523,6 +523,112 @@ describe("a reply that misses the schema is asked again, once (FR-068)", () => {
       new AgentSdkModelClient({ agentQuery: harness }).review(request()),
     ).rejects.toThrow(ModelError);
     expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("shares one deadline across both attempts rather than granting the retry a fresh one", async () => {
+    // FR-066 promises fifteen minutes. A controller created per ask would have given a retried
+    // review two full budgets and silently doubled the number an operator schedules around.
+    let asks = 0;
+    const slow = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) => {
+        asks += 1;
+
+        return (async function* () {
+          if (asks === 1) {
+            // A malformed reply, arriving just before the bound expires.
+            yield { type: "assistant", message: { content: [{ type: "text", text: "not json" }] } };
+            yield {
+              type: "result",
+              subtype: "success",
+              usage: { input_tokens: 10, output_tokens: 1 },
+            };
+
+            return;
+          }
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+          throw new Error("aborted");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: slow, deadlineMs: 60 }).review(request()),
+    ).rejects.toThrow(/did not answer within/);
+    // Two asks, one bound: the retry ran into the remainder and the whole review still ended at it.
+    expect(asks).toBe(2);
+  });
+
+  it("does not ask again once the bound has expired, since there is no remainder to ask into", async () => {
+    let asks = 0;
+    const expired = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield
+        return (async function* () {
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+          throw new Error("aborted");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: expired, deadlineMs: 25 }).review(request()),
+    ).rejects.toThrow(/did not answer within/);
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry a refused tool: an empty reply after an interrupt is not a schema miss", async () => {
+    // The predicate was broad enough to catch `carried no text content`, which is what an
+    // interrupted harness produces — routing the most security-relevant event this transport has
+    // straight back into a second ask.
+    let asks = 0;
+    const seeking = Object.assign(
+      (input: {
+        options?: {
+          canUseTool?: (n: string, i: Record<string, unknown>, o: unknown) => Promise<unknown>;
+        };
+      }) => {
+        asks += 1;
+
+        return (async function* () {
+          await input.options?.canUseTool?.("Bash", {}, {});
+          yield { type: "result", subtype: "error_during_execution", usage: undefined };
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: seeking }).review(request()),
+    ).rejects.toThrow(/attempted to use a tool/);
+    expect(asks).toBe(1);
+  });
+
+  it("does not retry an unauthenticated host", async () => {
+    let asks = 0;
+    const unauth = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        return (async function* () {
+          throw new Error("401 Unauthorized");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(new AgentSdkModelClient({ agentQuery: unauth }).review(request())).rejects.toThrow(
+      HARNESS_NOT_AUTHENTICATED,
+    );
+    expect(asks).toBe(1);
   });
 
   it("does not retry a subscription limit, which a second ask only makes worse", async () => {

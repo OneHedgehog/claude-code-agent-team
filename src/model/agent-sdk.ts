@@ -41,7 +41,7 @@ const MAX_TURNS = 1;
  *
  * The API transport made a schema violation impossible; this one makes it rejected, and the
  * observed rejection rate is high enough that a single attempt loses roughly a third of role-calls
- * (FR-068). One retry is the difference between a gate that passes when both roles happen to comply
+ * (FR-069). One retry is the difference between a gate that passes when both roles happen to comply
  * and one that passes routinely. Two, not more: a model that misses the schema twice given the
  * schema and its own failure is not going to be talked round by a third ask, and every attempt
  * spends.
@@ -121,7 +121,7 @@ export interface AgentSdkOptions {
    * if it does, a reviewed diff persuaded a tool-less reviewer to reach for a tool (FR-024).
    */
   readonly onRefusedTool?: (toolName: string) => void;
-  /** Told when a reply missed the schema and the harness is being asked again (FR-068). */
+  /** Told when a reply missed the schema and the harness is being asked again (FR-069). */
   readonly onSchemaRetry?: (attempt: number) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
   readonly env?: Record<string, string | undefined>;
@@ -256,50 +256,62 @@ export class AgentSdkModelClient implements ModelClient {
 
     let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
 
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        const response = await this.#ask(
-          request,
-          prompt,
-          // The second ask carries the schema, the first reply's fate, and nothing from the first
-          // reply itself -- a model that emitted prose must not have its prose fed back as context.
-          attempt === 1 ? sent : `${sent}\n\n${SCHEMA_CORRECTION}`,
-          floor,
-        );
+    // One bound for the whole review, not one per ask. FR-066 promises an operator fifteen minutes;
+    // creating the controller inside `#ask` would have given a retried review two full budgets and
+    // silently doubled the number they schedule around. The retry consumes the remainder.
+    const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
 
-        return { ...response, usage: add(spent, response.usage) };
-      } catch (error) {
-        const usage = error instanceof ModelError ? error.usage : floor;
-        spent = add(spent, usage);
+    try {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          const response = await this.#ask(
+            request,
+            prompt,
+            // The second ask carries the schema and the first reply's fate, and nothing from the
+            // reply itself -- prose fed back as context is prose invited again.
+            attempt === 1 ? sent : `${sent}\n\n${SCHEMA_CORRECTION}`,
+            floor,
+            abort,
+          );
 
-        // Only a schema violation is worth asking again. An unauthenticated host, a subscription
-        // limit, a deadline and a refused tool are all states a second identical ask cannot
-        // improve, and retrying a limit makes it worse (FR-068).
-        if (attempt >= MAX_ATTEMPTS || !isSchemaViolation(error)) {
-          throw error instanceof ModelError ? new ModelError(error.message, spent) : error;
+          return { ...response, usage: add(spent, response.usage) };
+        } catch (error) {
+          const usage = error instanceof ModelError ? error.usage : floor;
+          spent = add(spent, usage);
+
+          // Only a schema violation is worth asking again. An unauthenticated host, a subscription
+          // limit, a deadline and a refused tool are all states a second identical ask cannot
+          // improve, and retrying a limit makes it worse (FR-069).
+          //
+          // The deadline is checked explicitly as well as through the predicate, because the bound
+          // is shared: once it has fired there is no remainder to retry into, and a second ask
+          // would be spending against a budget that is already gone.
+          if (attempt >= MAX_ATTEMPTS || abort.signal.aborted || !isSchemaViolation(error)) {
+            throw error instanceof ModelError ? new ModelError(error.message, spent) : error;
+          }
+
+          this.#onSchemaRetry?.(attempt);
         }
-
-        this.#onSchemaRetry?.(attempt);
       }
+    } finally {
+      clearTimeout(deadline);
     }
   }
 
-  /** One ask, from spawning the harness to a validated response. Retried only on FR-068. */
+  /** One ask, from spawning the harness to a validated response. Retried only on FR-069. */
   async #ask(
     request: ReviewRequest,
     prompt: ReviewPrompt,
     sent: string,
     floor: ModelUsage,
+    abort: AbortController,
   ): Promise<ReviewResponse> {
     let text = "";
     // `null`, not a zeroed total: "never said" and "said nothing was spent" are different (FR-062).
     let usage: ModelUsage | null = null;
 
     const scratch = mkdtempSync(join(tmpdir(), "independent-review-"));
-
-    // Cancels rather than abandons: an orphaned subprocess keeps spending with nobody reading it.
-    const abort = new AbortController();
-    const deadline = setTimeout(() => abort.abort(), this.#deadlineMs);
 
     // Why the harness stopped, when it says. Otherwise a truncated run reads as malformed JSON.
     let resultSubtype: string | null = null;
@@ -373,7 +385,6 @@ export class AgentSdkModelClient implements ModelClient {
         usage ?? floor,
       );
     } finally {
-      clearTimeout(deadline);
       // Best effort. An orphaned empty directory under the system temp root is a smaller problem
       // than a review that failed because its scratch space could not be removed.
       rmSync(scratch, { recursive: true, force: true });
@@ -426,7 +437,7 @@ export class AgentSdkModelClient implements ModelClient {
   }
 }
 
-/** Two usages summed, so a retried review reports what both attempts cost (FR-068, FR-031). */
+/** Two usages summed, so a retried review reports what both attempts cost (FR-073). */
 function add(a: ModelUsage, b: ModelUsage): ModelUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
@@ -443,9 +454,12 @@ function add(a: ModelUsage, b: ModelUsage): ModelUsage {
  * once more and then reported exactly as it would have been.
  */
 function isSchemaViolation(error: unknown): boolean {
+  // Deliberately the two genuine parse failures and nothing else. `carried no text content` was
+  // here and is not one: an empty response is what a harness killed at the deadline or interrupted
+  // by a refused tool can produce, and routing those into a second ask is what FR-072 forbids.
   return (
     error instanceof ModelError &&
-    /(did not satisfy the review schema|was not JSON|carried no text content)/.test(error.message)
+    /(did not satisfy the review schema|was not JSON)/.test(error.message)
   );
 }
 
