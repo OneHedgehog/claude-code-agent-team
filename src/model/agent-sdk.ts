@@ -467,7 +467,7 @@ export class AgentSdkModelClient implements ModelClient {
  * cache counters too, and adding only input and output here would have lost the cached half of
  * every retried review — the same double-entry mistake as folding, one function over.
  */
-function add(a: ModelUsage, b: ModelUsage): ModelUsage {
+export function add(a: ModelUsage, b: ModelUsage): ModelUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,

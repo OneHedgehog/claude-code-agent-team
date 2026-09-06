@@ -6,6 +6,7 @@ import {
   HARNESS_FELL_BACK_TO_METERED,
   HARNESS_LIMIT_REACHED,
   HARNESS_NOT_AUTHENTICATED,
+  add,
   scopedEnvironment,
   type AgentQuery,
 } from "../../../src/model/agent-sdk.js";
@@ -549,6 +550,22 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     // And carries none of the rejected reply back: a model that emitted prose must not be handed
     // its own prose as context.
     expect(harness.prompts[1]).not.toContain("not json");
+  });
+
+  it("sums every field of ModelUsage, so a new one cannot be dropped silently", () => {
+    // Twice now a change to `ModelUsage` and a change to this transport have been written on
+    // separate branches and disagreed about usage arithmetic — folding cached tokens into input,
+    // then summing only two of four fields when charging a retry. Both were caught by the
+    // compiler at rebase time and by nothing else. This keys on the shape rather than on a list,
+    // so the next field added fails here instead of being quietly lost.
+    const left = { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3, cacheReadTokens: 4 };
+    const right = { inputTokens: 10, outputTokens: 20, cacheWriteTokens: 30, cacheReadTokens: 40 };
+    const summed = add(left, right) as unknown as Record<string, number>;
+
+    expect(Object.keys(summed).sort()).toEqual(Object.keys(left).sort());
+    for (const field of Object.keys(left) as (keyof typeof left)[]) {
+      expect(summed[field]).toBe(left[field] + right[field]);
+    }
   });
 
   it("charges both attempts, since both were spent", async () => {
