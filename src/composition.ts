@@ -64,6 +64,7 @@ import {
   type ModelClient,
   type PriorFinding,
   type PullRequestContext,
+  CHARS_PER_TOKEN,
 } from "./model/client.js";
 import {
   escalate,
@@ -797,7 +798,6 @@ export async function notify(
  * cannot afford itself, and being approximate is why the overhead below is generous rather than
  * measured.
  */
-const CHARS_PER_TOKEN = 4;
 
 /**
  * What a role's prompt carries besides the diff: the constitution, the role brief, the injection

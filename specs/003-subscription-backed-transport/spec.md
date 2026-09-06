@@ -147,8 +147,8 @@ upgrade has something to invalidate rather than a silent regression.
 
 ## The subscription has its own exhaustion mode
 
-Not hypothetical: rounds 4 and 7 of this feature's own review each produced no verdict from a
-reviewer because the harness answered `You've hit your session limit`.
+Not hypothetical: more than one round of this feature's own review produced no verdict from a
+reviewer because the harness answered `You've hit your session limit`. `plan.md` records which.
 
 This matters because the feature's premise is that a metered balance running out closed the gate,
 and the subscription route removes that dependency. It removes *that* limit and introduces a

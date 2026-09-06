@@ -17,6 +17,7 @@ import {
   type ModelUsage,
   type ReviewRequest,
   type ReviewResponse,
+  CHARS_PER_TOKEN,
 } from "./client.js";
 
 /**
@@ -36,9 +37,6 @@ const MAX_TURNS = 1;
 
 /** The wall-clock bound, and what it costs an operator: FR-066. */
 const DEADLINE_MS = 15 * 60 * 1000;
-
-/** The same ratio the budget forecast uses, so a floor here and an estimate there agree. */
-const CHARS_PER_TOKEN = 4;
 
 /** FR-051 cannot catch this on a transport that resolves no credential, so the run names it. */
 export const HARNESS_NOT_AUTHENTICATED =
@@ -227,10 +225,9 @@ export class AgentSdkModelClient implements ModelClient {
     // What the call certainly cost. An aborted turn yields no `result`, so the most expensive
     // failure here would otherwise reach the ledger as free: an under-estimate beats a zero
     // (FR-067).
+    const sent = `${prompt.userContent}\n\n${jsonOnlyInstruction()}`;
     const floor: ModelUsage = {
-      inputTokens: Math.ceil(
-        (prompt.systemPrompt.length + prompt.userContent.length) / CHARS_PER_TOKEN,
-      ),
+      inputTokens: Math.ceil((prompt.systemPrompt.length + sent.length) / CHARS_PER_TOKEN),
       outputTokens: 0,
     };
 
@@ -252,7 +249,7 @@ export class AgentSdkModelClient implements ModelClient {
 
     try {
       for await (const message of this.#query({
-        prompt: `${prompt.userContent}\n\n${jsonOnlyInstruction()}`,
+        prompt: sent,
         options: {
           model: REVIEW_MODEL,
           systemPrompt: prompt.systemPrompt,
@@ -320,6 +317,17 @@ export class AgentSdkModelClient implements ModelClient {
       // Best effort. An orphaned empty directory under the system temp root is a smaller problem
       // than a review that failed because its scratch space could not be removed.
       rmSync(scratch, { recursive: true, force: true });
+    }
+
+    if (abort.signal.aborted) {
+      // Checked here rather than only in the catch block, because reaching the catch depends on the
+      // SDK raising when the signal fires rather than ending the stream. An iterator that simply
+      // returns would land on the metering guard below and report a cancelled fifteen-minute review
+      // as an accounting defect. This guard needs no claim about the SDK at all (FR-066).
+      throw new ModelError(
+        `the harness did not answer within ${Math.round(this.#deadlineMs / 1000)}s`,
+        usage ?? floor,
+      );
     }
 
     if (resultSubtype !== null && resultSubtype !== "success") {

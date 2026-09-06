@@ -214,10 +214,10 @@ no longer be treating the diff as data, and one that inherited the operator's ow
 review the same revision differently on two machines.
 
 Withholding the tools takes three independent refusals, because the first two are claims about
-someone else's contract. `tools: []` is the option that actually withholds them — `allowedTools` only
-pre-approves, and an empty allowlist leaves every tool defined and merely unapproved. `canUseTool`
-denies unconditionally and emits `tool.refused`, a record expected never to appear: if it does, a
-reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
+someone else's contract. `tools: []` is the option that actually withholds them — `allowedTools`
+only pre-approves, and an empty allowlist leaves every tool defined and merely unapproved.
+`canUseTool` denies unconditionally and emits `tool.refused`, a record expected never to appear: if
+it does, a reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
 temporary directory rather than the orchestrator's own checkout, so a relative path resolved in the
 subprocess no longer lands in the tree holding the App key and every other checkout.
 
@@ -252,16 +252,15 @@ The subscription is not immune to running out either. A session or rate limit re
 `the review harness has reached a subscription limit`, fails closed as a missing verdict, and is
 subject to Principle IV exactly as an exhausted credit balance is — no spending, no weakened gate,
 the system degrades to stopped (FR-065). This transport moves the funding failure; it does not
-remove it, and round 4 of its own review demonstrated that rather than leaving it theoretical.
+remove it.
 
-A refused tool is recorded and **not** escalated (FR-064), and it costs more than an earlier
-draft of this paragraph claimed. The refusal interrupts the turn, so **that revision produces no
-verdict** — one tool-seeking line in a diff destroys its own review. It is not silent, though: the
-gate fails with `reviewed content attempted to use a tool…` as its stated reason, which is where an
-author looks and is the one cause they can act on, and `tool.refused` sits at `warn` beside
-`location.rejected`. No escalation, because the failed gate is already the visible artifact and the
-next revision reviews normally. An operator who wants an injection attempt to page someone should
-wire that record.
+A refused tool is recorded and **not** escalated (FR-064), and it is not free: the refusal
+interrupts the turn, so **that revision produces no verdict** — one tool-seeking line in a diff
+destroys its own review. It is not silent, though. The gate fails with `reviewed content attempted
+to use a tool…` as its stated reason, which is where an author looks and is the one cause they can
+act on, and `tool.refused` sits at `warn` beside `location.rejected`. There is no escalation because
+the failed gate is already the visible artifact and the next revision reviews normally. An operator
+who wants an injection attempt to page someone should wire that record.
 
 Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
 there is bounded by one turn, by a **fifteen-minute deadline**, and by the budget check that

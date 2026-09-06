@@ -342,7 +342,10 @@ describe("the response is consumed through the schema, exactly as on the API tra
   it("abandons a harness that does not answer, rather than holding the only review slot", async () => {
     // Nothing else bounds time, and `maxConcurrentReviews: 1` means a hung review holds the only
     // slot forever (FR-066).
-    const hanging = Object.assign(
+    // Two doubles, because the reason must not depend on how the SDK reacts to the signal. One
+    // raises on abort; the other ends the stream normally, which would otherwise fall through to
+    // the metering guard and report a cancelled review as an accounting defect (FR-066).
+    const raising = Object.assign(
       (input: { options?: { abortController?: AbortController } }) =>
         // eslint-disable-next-line require-yield
         (async function* () {
@@ -354,9 +357,22 @@ describe("the response is consumed through the schema, exactly as on the API tra
       { calls: [] },
     ) as unknown as AgentQuery;
 
-    await expect(
-      new AgentSdkModelClient({ agentQuery: hanging, deadlineMs: 25 }).review(request()),
-    ).rejects.toThrow(/did not answer within/);
+    const returning = Object.assign(
+      (input: { options?: { abortController?: AbortController } }) =>
+        // eslint-disable-next-line require-yield
+        (async function* () {
+          await new Promise((resolve) => {
+            input.options?.abortController?.signal.addEventListener("abort", resolve);
+          });
+        })(),
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    for (const agentQuery of [raising, returning]) {
+      await expect(
+        new AgentSdkModelClient({ agentQuery, deadlineMs: 25 }).review(request()),
+      ).rejects.toThrow(/did not answer within/);
+    }
   });
 
   it("refuses to record a review whose usage arrived in a shape it does not recognise", async () => {

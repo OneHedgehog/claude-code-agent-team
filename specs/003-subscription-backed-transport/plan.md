@@ -134,17 +134,16 @@ optional; a feature touching several subsystems would need it.
 `tests/e2e/agent-transport.e2e.ts`, which drives this transport end to end against the real fixture
 repository with only the SDK's `query` scripted.
 
-Beyond the suite, this feature was reviewed by the service it belongs to, through the transport it
-adds, with no API credential resolvable on the host — which is SC-002 exercised rather than
-asserted. Each round is listed by the revision that **was reviewed**, not the one that answered it:
+Beyond the suite, this feature was reviewed nine times by the service it belongs to, through the
+transport it adds, with no API credential resolvable on the host — SC-002 exercised rather than
+asserted. The round-by-round log is on the pull request, which keeps it permanently and does not
+need this file to restate it; an earlier revision of this section carried a table instead, and it
+was wrong twice, because a log that grows by a row per round cannot be maintained inside the diff
+it describes.
 
-| round | revision reviewed | what it caught |
-|---|---|---|
-| 1 | `6281469` | No spec, no adapter tests, an unwaived proprietary dependency, and the settings flip landing unescalated |
-| 2 | `ad40205` | `allowedTools: []` is an auto-approval list, not an absence; `cwd` unset; `maxTokens` silently dropped |
-| 3 | `4b9e086` | The subprocess inherited `process.env` whole, exhausted API key included |
-| 4 | `4795a72` | The metering guard walked through by `usage: undefined`; no e2e test; no time bound |
-| 5 | `a5bc057` | FR-063 describing a mechanism the code had rejected; the e2e substituting the composed client; the guards in the wrong order |
+Two rounds lost a reviewer to the subscription's session limit and two to a response that missed the
+schema (FR-059) — four of nine, which is this transport's disclosed cost observed rather than
+estimated, and the number an operator should weigh before selecting it.
 
 The pattern is worth naming, because it is the argument for the e2e scenario: every one of those was
 a claim about someone else's contract, held by a unit test the same author wrote, which could only

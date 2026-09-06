@@ -112,3 +112,10 @@ export class ModelError extends Error {
 export function totalTokens(usage: ModelUsage): number {
   return usage.inputTokens + usage.outputTokens;
 }
+
+/**
+ * Characters per token, for the two places that must agree: the budget forecast that authorises a
+ * review, and the spend floor charged when one is abandoned before the model reports usage
+ * (FR-067). Defined once rather than twice with a comment claiming the two match.
+ */
+export const CHARS_PER_TOKEN = 4;
