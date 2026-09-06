@@ -249,11 +249,9 @@ export interface ReviewPrompt {
    */
   readonly volatileContent: string;
   /**
-   * The two parts joined, for readers of the prompt rather than for the request path. The client
-   * sends them as separate content blocks, which the API concatenates without the blank line this
-   * adds -- so this is a near-copy of the wire content, not the wire content. It exists because the
-   * FR-036 guard tests assert against the whole turn, and a guard asserted against one half of a
-   * prompt is a guard with a hole in it.
+   * The two parts concatenated exactly as the API concatenates them, so the guard tests assert
+   * against the bytes the wire carries rather than a near-copy of them. The separator lives in
+   * `cacheablePrefix`, which is what makes the two identical (FR-036).
    */
   readonly userContent: string;
 }
@@ -268,7 +266,13 @@ export function buildReviewPrompt(request: ReviewRequest): ReviewPrompt {
   // The constitution is ~11,000 tokens and was re-sent on every call: two roles times every round
   // times every pull request, all of it identical. That was roughly a third of everything this
   // service spent before the breakpoint below existed.
-  const cacheablePrefix = block("CONSTITUTION", request.constitution);
+  // The separator belongs to the prefix, not to the join. The client sends these as two content
+  // blocks and the API concatenates them with nothing between, so a separator added only when the
+  // two are joined for the tests would leave `END CONSTITUTION` and `BEGIN PULL REQUEST` sharing a
+  // line on the wire -- at the boundary between the trusted prefix and the first untrusted block,
+  // which is the boundary the fences exist to hold (FR-036). Still byte-stable, so the cache
+  // prefix is unaffected.
+  const cacheablePrefix = `${block("CONSTITUTION", request.constitution)}\n\n`;
 
   const volatileContent = [
     block(
@@ -287,7 +291,7 @@ export function buildReviewPrompt(request: ReviewRequest): ReviewPrompt {
     systemPrompt: INJECTION_GUARD,
     cacheablePrefix,
     volatileContent,
-    userContent: [cacheablePrefix, volatileContent].join("\n\n"),
+    userContent: `${cacheablePrefix}${volatileContent}`,
   };
 }
 

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { MERGE_GATE_CHECK_NAME } from "../../../src/github/check-run.js";
+import { ZERO_USAGE } from "../../../src/model/client.js";
 
 import {
   createFixtureClient,
@@ -33,13 +34,13 @@ const APPROVING = {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0 },
+    usage: { ...ZERO_USAGE, inputTokens: 1_000, outputTokens: 100 },
   },
   implementation: {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0 },
+    usage: { ...ZERO_USAGE, inputTokens: 1_000, outputTokens: 100 },
   },
 };
 

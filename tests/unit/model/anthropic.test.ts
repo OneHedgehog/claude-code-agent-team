@@ -570,8 +570,12 @@ describe("prompt caching (the constitution is the only stable prefix)", () => {
     // the comparison and so cannot detect a change to the prompt text itself -- the very thing this
     // guard is named for.
     const blocks = (messages.sent[0] as Sent).messages[0]?.content ?? [];
+    // The trailing blank line is part of the cached block on purpose: the API concatenates the two
+    // blocks with nothing between them, so without it `END CONSTITUTION` and `BEGIN PULL REQUEST`
+    // would share a line on the wire — at the boundary between the trusted prefix and the first
+    // untrusted block, which is the boundary the fences hold (FR-036).
     expect(blocks[0]?.text).toBe(
-      "--- BEGIN CONSTITUTION ---\nCONSTITUTION BODY\n--- END CONSTITUTION ---",
+      "--- BEGIN CONSTITUTION ---\nCONSTITUTION BODY\n--- END CONSTITUTION ---\n\n",
     );
     expect(blocks[1]?.text).toContain("--- BEGIN DIFF ---\nDIFF BODY\n--- END DIFF ---");
     expect(blocks[1]?.text).toContain('"title":"T"');
