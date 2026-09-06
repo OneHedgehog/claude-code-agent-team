@@ -318,7 +318,7 @@ capability silently. A live run reported `cacheWrite` and
 `cacheRead` of 15,427 tokens each, the second role reading back exactly the prefix the first wrote,
 so the request shape is accepted rather than rejected.
 
-That evidence does not, on its own, show the *hour* is honoured: both roles of one review run
+That evidence does not, on its own, show the *hour* is honoured: both roles of one review **ran**
 minutes apart, well inside the five-minute default, so an ignored `ttl` would look identical within
 a single run. What distinguishes them is a cache read on a run that starts more than five minutes
 after the previous one — visible in the counters, and the reason they are recorded at all.
