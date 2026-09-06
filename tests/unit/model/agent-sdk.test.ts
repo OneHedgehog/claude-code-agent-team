@@ -556,39 +556,42 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
   });
 
   it("shares one deadline across both attempts rather than granting the retry a fresh one", async () => {
-    // FR-066 promises fifteen minutes. A controller created per ask would have given a retried
-    // review two full budgets and silently doubled the number an operator schedules around.
+    // Asserted on the controller's identity, not on the clock. A timing test cannot tell the two
+    // apart: with a fresh controller per ask, the first ask still returns, the second still aborts,
+    // and the same error still throws — which is how the version of this test written alongside the
+    // fix passed against the very regression the fix was for.
+    //
+    // One bound means one controller. FR-066 promises fifteen minutes for a review; a controller
+    // created inside the ask gave a retried review two of them.
+    const seen: (AbortController | undefined)[] = [];
     let asks = 0;
+
     const slow = Object.assign(
       (input: { options?: { abortController?: AbortController } }) => {
         asks += 1;
+        seen.push(input.options?.abortController);
+        const text = asks === 1 ? "not json" : WELL_FORMED;
 
+        // eslint-disable-next-line @typescript-eslint/require-await
         return (async function* () {
-          if (asks === 1) {
-            // A malformed reply, arriving just before the bound expires.
-            yield { type: "assistant", message: { content: [{ type: "text", text: "not json" }] } };
-            yield {
-              type: "result",
-              subtype: "success",
-              usage: { input_tokens: 10, output_tokens: 1 },
-            };
-
-            return;
-          }
-          await new Promise((resolve) => {
-            input.options?.abortController?.signal.addEventListener("abort", resolve);
-          });
-          throw new Error("aborted");
+          yield { type: "assistant", message: { content: [{ type: "text", text }] } };
+          yield {
+            type: "result",
+            subtype: "success",
+            usage: { input_tokens: 10, output_tokens: 1 },
+          };
         })();
       },
       { calls: [] },
     ) as unknown as AgentQuery;
 
-    await expect(
-      new AgentSdkModelClient({ agentQuery: slow, deadlineMs: 60 }).review(request()),
-    ).rejects.toThrow(/did not answer within/);
-    // Two asks, one bound: the retry ran into the remainder and the whole review still ended at it.
-    expect(asks).toBe(2);
+    await new AgentSdkModelClient({ agentQuery: slow }).review(request());
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeDefined();
+    // The whole assertion: the retry was handed the bound the first ask was already counting
+    // against, not one of its own.
+    expect(seen[1]).toBe(seen[0]);
   });
 
   it("does not ask again once the bound has expired, since there is no remainder to ask into", async () => {
