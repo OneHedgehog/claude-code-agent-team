@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +11,12 @@ import {
 } from "../../../src/composition.js";
 import type { LoadedSettings } from "../../../src/config/settings.js";
 import { appConfigDirectory } from "../../../src/github/auth.js";
+import { resolveInTarget } from "../../../src/config/target.js";
 import { hostSlotsDirectory, noSlot, withHostLease } from "../../../src/host-lease.js";
 import type { Ledger } from "../../../src/ledger/tokens.js";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.js";
+import type { AgentQuery } from "../../../src/model/agent-sdk.js";
+import { validateSettings } from "../../../src/config/settings.js";
 import { createLogger } from "../../../src/observability/logger.js";
 import { runGit, withWorktree } from "../../../src/worktree.js";
 import { runDaemon } from "../../../src/daemon.js";
@@ -55,7 +58,13 @@ export interface ComposeFixtureOptions extends RunEnvironmentOptions {
   readonly client: FixtureClient;
   /** The checkout the run is addressed at (FR-026). Normally a worktree at the revision. */
   readonly checkoutPath: string;
+  /** The one permitted substitution (FR-029, FR-030). */
   readonly model?: ScriptedModelClient;
+  /**
+   * The scripted harness for the `agent-sdk` transport. Passed through to `composeService` so the
+   * root builds the adapter, rather than the scenario building one the root would not.
+   */
+  readonly agentQuery?: AgentQuery;
   /** Pre-drawn for scenarios 14, 15, and 17; the real JSONL ledger otherwise. */
   readonly ledger?: Ledger;
   /** Supplied by scenario 28, which is about settings the fixture does not carry. */
@@ -145,6 +154,7 @@ export async function composeAgainstFixture(options: ComposeFixtureOptions): Pro
     env,
     // The one permitted substitution (FR-029, FR-030).
     ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.agentQuery === undefined ? {} : { agentQuery: options.agentQuery }),
     ...(options.ledger === undefined ? {} : { ledger: options.ledger }),
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.installationToken === undefined
@@ -337,4 +347,87 @@ export async function fixtureCheckout(client: FixtureClient): Promise<string> {
   });
 
   return path;
+}
+
+export interface AgentTransportRunOptions extends RunEnvironmentOptions {
+  readonly client: FixtureClient;
+  readonly pullRequest: FixturePullRequest;
+  /** The scripted Claude Code harness. `scriptedHarness` builds one. */
+  readonly agentQuery: AgentQuery;
+}
+
+export interface AgentTransportRun {
+  readonly outcome: ReviewOutcome;
+  readonly adapters: ServiceAdapters;
+  readonly records: readonly unknown[];
+  readonly runId: string;
+}
+
+/**
+ * The same end-to-end flow as `runReview`, driven on the `agent-sdk` transport (Principle II).
+ *
+ * `runReview` cannot cover it: substituting `ScriptedModelClient` replaces the whole model boundary, so
+ * on this transport it would skip the adapter under test. Here the root builds the real client
+ * from an injected `agentQuery`, and everything else is as real as any other scenario.
+ */
+export async function runReviewOnAgentTransport(
+  options: AgentTransportRunOptions,
+): Promise<AgentTransportRun> {
+  const { client, pullRequest } = options;
+  const stateDirectory = options.stateDirectory ?? isolatedStateDirectory();
+  const records: unknown[] = [];
+
+  const { token } = await client.environment.installationToken();
+  const { owner, name } = client.environment.repository;
+  const remoteUrl = `https://x-access-token:${token}@github.com/${owner}/${name}.git`;
+
+  const environmentForLease = runEnvironment({ ...options, stateDirectory });
+
+  return withWorktree(
+    {
+      target: client.target(client.environment.cacheDirectory),
+      remoteUrl,
+      pullRequest: pullRequest.number,
+      headSha: pullRequest.headSha,
+      cacheDirectory: client.environment.cacheDirectory,
+    },
+    async (tree) => {
+      // The fixture's own settings file, with the transport moved. Read rather than fabricated, so
+      // the budgets and caps the run applies stay the fixture's real ones.
+      const file = JSON.parse(
+        readFileSync(resolveInTarget(client.target(tree.path), ".agents", "settings.json"), "utf8"),
+      ) as Record<string, Record<string, unknown>>;
+      const settings = validateSettings({
+        ...file,
+        reviewService: { ...file["reviewService"], modelTransport: "agent-sdk" },
+      });
+
+      const composed = await composeAgainstFixture({
+        ...options,
+        checkoutPath: tree.path,
+        stateDirectory,
+        settings,
+        // The harness, not the client. `composeService` builds the adapter itself so the branch
+        // this feature adds to the root — and the `onRefusedTool` / `onRejectedLocation` callbacks
+        // it wires — are what the scenario exercises. Constructing the client here would have left
+        // those two lambdas covered by nothing, which is the gap this scenario exists to close.
+        agentQuery: options.agentQuery,
+        records,
+      });
+
+      const result = await withHostLease(
+        {
+          directory: hostSlotsDirectory(environmentForLease),
+          capacity: composed.adapters.settings.host.maxConcurrentAgents,
+        },
+        () => reviewPullRequest(composed.adapters, pullRequest.number, { runId: composed.runId }),
+      );
+
+      if (noSlot(result)) {
+        throw new HarnessError("no host slot free for the agent-transport scenario");
+      }
+
+      return { outcome: result, adapters: composed.adapters, records, runId: composed.runId };
+    },
+  );
 }

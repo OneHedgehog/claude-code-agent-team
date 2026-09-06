@@ -184,6 +184,102 @@ with every run.
 
 ## Decisions and trade-offs
 
+**The reviewer reaches the model one of two ways, and `modelTransport` chooses.** The requirements,
+and the two constitutional waivers permitting the second one, are recorded in
+[specs/003-subscription-backed-transport](../specs/003-subscription-backed-transport/spec.md) —
+a proprietary dependency, and a substitution the operator approved after a metered resource ran
+out. `api` calls the Messages API with a credential this process resolves — metered against an
+organisation's API credits. `agent-sdk` runs Claude Code as a library, which authenticates itself
+and bills the operator's subscription.
+
+The second exists because the first has a failure mode that closes the repository. The gate has one
+producer; when its credits run out mid-session the reviewer stops, and because a concluded failing
+check run already exists for that revision, nothing retries it. `main` is then shut behind a
+reviewer that cannot run — including to the change that would fix it. A subscription-funded
+transport removes the metered dependency from the critical path rather than making the outage
+cheaper.
+
+What it costs is the response *guarantee*. The API transport constrains the reply with
+`output_config.format` before a byte is generated; the agent transport asks for the schema in words
+and reproduces it in the prompt. Both then go through the same `parseReviewResponse`, so validation
+is unchanged and a malformed answer still becomes a missing verdict and a failed gate (FR-007) —
+what is lost is that malformed answers were previously impossible rather than merely rejected. That
+is a real reduction, and the reason `api` remains the default: no operator should have their billing
+or their contract changed by an upgrade.
+
+Both transports share `buildReviewPrompt` and `parseReviewResponse` rather than reimplementing them,
+so the injection guard (FR-036) and the response contract cannot drift apart. The agent transport
+runs with no tools and no inherited settings: a reviewer that could read files or run commands would
+no longer be treating the diff as data, and one that inherited the operator's own instructions would
+review the same revision differently on two machines.
+
+Withholding the tools takes three independent refusals, because the first two are claims about
+someone else's contract. `tools: []` is the option that actually withholds them — `allowedTools`
+only pre-approves, and an empty allowlist leaves every tool defined and merely unapproved.
+`canUseTool` denies unconditionally and emits `tool.refused`, a record expected never to appear: if
+it does, a reviewed diff talked a tool-less reviewer into reaching for a tool. And `cwd` points at an empty
+temporary directory rather than the orchestrator's own checkout, so a relative path resolved in the
+subprocess no longer lands in the tree holding the App key and every other checkout.
+
+`cwd` is tidiness, not containment, and it is worth being exact about that because it is the layer a
+reader would otherwise fall back on: it moves where *relative* paths resolve and constrains nothing
+absolute, and `HOME` is deliberately reachable because the subscription credential lives there. The
+harness runs as an ordinary child process — no container, no resource limit, no egress restriction
+of our own. So the three refusals are the control and are load-bearing rather than redundant, which
+is why one of them (`canUseTool`) does not depend on the SDK's option semantics at all. Recorded in
+[specs/003](../specs/003-subscription-backed-transport/spec.md) under "What this feature does not
+contain". The child's environment is an allowlist — `PATH`, `HOME`, `USER`, `CLAUDE_CONFIG_DIR` and three
+encoding and scratch variables — rather than the orchestrator's own, which carries the GitHub App
+key, the installation token, and `ANTHROPIC_API_KEY`. `USER` is in the list because without it the
+harness does not reach the subscription at all.
+
+The two Anthropic credential names are passed **present and empty** rather than dropped, so *those
+two* are neutralised whether the SDK replaces the child's environment or merges over the parent's.
+Everything else — the App key included — is withheld by replacement alone, which was measured rather
+than assumed and is pinned to one SDK version. [specs/003](../specs/003-subscription-backed-transport/spec.md)
+records that residual under "What this feature does not contain", so an upgrade has something to
+invalidate. That last one is not hardening: this transport
+exists because the credits behind that key ran out, and a harness that inherited and preferred it
+would meter every subscription-funded review against the exhausted balance and rebuild the deadlock,
+while the record claimed otherwise (FR-063).
+
+A harness that authenticates against the metered API balance instead of the subscription — the
+failure FR-063 exists to prevent — says so by name rather than arriving as a generic call failure.
+That is the premise of this transport ceasing to hold, and it should be visible at the moment it
+happens.
+
+The subscription is not immune to running out either. A session or rate limit reads as
+`the review harness has reached a subscription limit`, fails closed as a missing verdict, and is
+subject to Principle IV exactly as an exhausted credit balance is — no spending, no weakened gate,
+the system degrades to stopped (FR-065). This transport moves the funding failure; it does not
+remove it.
+
+A refused tool is recorded and **not** escalated (FR-064), and it is not free: the refusal
+interrupts the turn, so **that revision produces no verdict** — one tool-seeking line in a diff
+destroys its own review. It is not silent, though. The gate fails with `reviewed content attempted
+to use a tool…` as its stated reason, which is where an author looks and is the one cause they can
+act on, and `tool.refused` sits at `warn` beside `location.rejected`. There is no escalation because
+the failed gate is already the visible artifact and the next revision reviews normally. An operator
+who wants an injection attempt to page someone should wire that record.
+
+Two things do not cross the boundary. `maxTokens` has no equivalent in the harness, so a review
+there is bounded by one turn, by a **fifteen-minute deadline**, and by the budget check that
+authorised it rather than by an output ceiling (FR-061, FR-066) — stated rather than silently
+dropped. The deadline cancels the harness rather than abandoning it, and it costs something worth
+knowing: a slow-but-working review at `max` effort on a large diff becomes a missing verdict when it
+expires, and the bound is a constant rather than an operating setting, so raising it needs a code
+change. The alternative it replaces is worse — with `maxConcurrentReviews: 1` a hung review holds
+the only slot forever, saying nothing. An abandoned review is charged what its prompt cost rather
+than zero, since an aborted turn reports no usage at all (FR-067). And because this transport resolves no
+credential, FR-051's presence check passes by construction; a host where the subscription is not
+signed in fails at review time instead, which the run names as such rather than reporting a generic
+call failure.
+
+`modelEffort` is spent on whichever transport is selected — `output_config.effort` on `api`, the
+harness's own `effort` option on `agent-sdk`. It is reported as an effective setting with every run,
+and a setting reported as effective while being silently inert would make that record an assurance
+rather than a disclosure (FR-060).
+
 **The model call is behind an interface** so end-to-end tests drive the entire flow with a scripted
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.

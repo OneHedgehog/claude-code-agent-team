@@ -164,6 +164,11 @@
           "minimum": 1,
           "default": 1
         },
+        "modelTransport": {
+          "description": "OPTIONAL (FR-054) — how the reviewer reaches the model. \"api\" calls the Messages API with a credential this process holds, metered against an organisation's API credits. \"agent-sdk\" runs Claude Code as a library, which authenticates itself and bills the operator's subscription; it constrains the response by instruction rather than by schema, so the parser is the only thing enforcing the contract. Absent, the documented default below is applied rather than stopping the run.",
+          "enum": ["api", "agent-sdk"],
+          "default": "api"
+        },
         "modelEffort": {
           "description": "OPTIONAL (FR-054) — depth/cost trade-off passed to the model boundary. Absent, the documented default below is applied rather than stopping the run, and the effective value is reported with the run so that no behavior depends on a value nobody can see.",
           "enum": ["low", "medium", "high", "xhigh", "max"],

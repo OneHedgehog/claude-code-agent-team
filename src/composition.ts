@@ -47,6 +47,7 @@ import {
 import { createLedger, JsonlLedgerStore, type Ledger } from "./ledger/tokens.js";
 import Anthropic from "@anthropic-ai/sdk";
 
+import { AgentSdkModelClient, type AgentQuery } from "./model/agent-sdk.js";
 import {
   AnthropicModelClient,
   MAX_OUTPUT_TOKENS,
@@ -63,6 +64,7 @@ import {
   type ModelClient,
   type PriorFinding,
   type PullRequestContext,
+  CHARS_PER_TOKEN,
 } from "./model/client.js";
 import {
   escalate,
@@ -192,6 +194,16 @@ export interface ComposeOptions {
    * rather than substituting the adapter and testing neither.
    */
   readonly messages?: MessagesApi;
+  /**
+   * The same seam for the `agent-sdk` transport: the harness, injected, so the root builds the real
+   * adapter with the callbacks it wires rather than a test constructing its own.
+   *
+   * This exists because substituting `model` skips the two lambdas below, and one of them is the
+   * only thing standing between a refused tool and an unrecorded refused tool -- a guarantee the
+   * documentation calls "the single most important thing a run could have to say", held up by two
+   * lines nothing executed.
+   */
+  readonly agentQuery?: AgentQuery;
   readonly logger?: Logger;
   readonly ledger?: Ledger;
   readonly settings?: LoadedSettings;
@@ -575,30 +587,60 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
   const octokit = options.octokit ?? new Octokit({ auth: authenticated.token });
   const graphqlClient = options.graphqlClient ?? graphql;
 
-  const modelCredential = resolveModelCredential({
-    env,
-    keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),
-  });
+  // `agent-sdk` runs Claude Code as a library, which authenticates itself against the operator's
+  // subscription -- so this process holds no model credential at all, and FR-051's presence check
+  // has nothing to check. Reported as a credential whose source is the transport, rather than as
+  // an absent one, so a run that cannot reach the model still fails for a stated reason.
+  const transport = settings.settings.modelTransport;
 
-  // Constructed only when a credential exists. An absent one is not an error *here* — it is a
-  // startup prerequisite, reported with a reason and zero spend rather than as a 401 mid-review
-  // (FR-032, FR-051) — so the client is only built once there is something to build it from.
+  // Annotated rather than asserted. `as ModelCredential` would have silenced the compiler on the
+  // one value in this file that no resolver ever checked; an annotation keeps it checking, and it
+  // passes today because `apiKey` is genuinely nullable -- the `oauth-profile` source already
+  // carries no key.
+  const agentSdkCredential: ModelCredential = { source: "agent-sdk", apiKey: null };
+
+  const modelCredential =
+    transport === "agent-sdk"
+      ? agentSdkCredential
+      : resolveModelCredential({
+          env,
+          keychain: options.readKeychain ?? macosKeychainReader("anthropic-api-key"),
+        });
+
+  // On `api`, constructed only when a credential exists. An absent one is not an error *here* — it
+  // is a startup prerequisite, reported with a reason and zero spend rather than as a 401
+  // mid-review (FR-032, FR-051) — so that client is only built once there is something to build it
+  // from. `agent-sdk` has no such precondition, for the reason the block above gives: the harness
+  // authenticates itself, and this process holds nothing to check.
   const model =
     options.model ??
-    (modelCredential === null
-      ? unavailableModel(MISSING_CREDENTIAL_REASON)
-      : new AnthropicModelClient({
-          credential: modelCredential,
-          // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
-          // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
-          messages: options.messages ?? anthropicMessages(modelCredential),
-          // A refused location is a fact about model output, and one of its causes is an attempt
-          // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
+    (transport === "agent-sdk"
+      ? new AgentSdkModelClient({
+          ...(options.agentQuery === undefined ? {} : { agentQuery: options.agentQuery }),
+          // The same record on both transports: a refused location is a fact about model output,
+          // and one of its causes is an attempt to name a path outside the checkout (FR-024).
           onRejectedLocation: (rejection) =>
             logger.warn("location.rejected", {
               location: { path: rejection.path, reason: rejection.reason },
             }),
-        }));
+          // Expected never to fire. If it does, a reviewed diff talked a tool-less reviewer into
+          // reaching for a tool, and a run that stayed silent about that would be worthless.
+          onRefusedTool: (toolName) => logger.warn("tool.refused", { tool: { name: toolName } }),
+        })
+      : modelCredential === null
+        ? unavailableModel(MISSING_CREDENTIAL_REASON)
+        : new AnthropicModelClient({
+            credential: modelCredential,
+            // An `oauth-profile` credential carries no key: the SDK reads the profile itself, so a
+            // bare constructor is correct rather than lazy (CLAUDE.md, verified 2026-08-17).
+            messages: options.messages ?? anthropicMessages(modelCredential),
+            // A refused location is a fact about model output, and one of its causes is an attempt
+            // to name a path outside the checkout. Recorded rather than silently corrected (FR-024).
+            onRejectedLocation: (rejection) =>
+              logger.warn("location.rejected", {
+                location: { path: rejection.path, reason: rejection.reason },
+              }),
+          }));
 
   const ledger =
     options.ledger ??
@@ -756,7 +798,6 @@ export async function notify(
  * cannot afford itself, and being approximate is why the overhead below is generous rather than
  * measured.
  */
-const CHARS_PER_TOKEN = 4;
 
 /**
  * What a role's prompt carries besides the diff: the constitution, the role brief, the injection

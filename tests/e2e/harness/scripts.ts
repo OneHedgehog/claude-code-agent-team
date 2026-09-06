@@ -4,7 +4,9 @@ import type {
   ReplyJudgement,
   ReviewResponse,
 } from "../../../src/model/client.js";
+import { isPullRequestLevel } from "../../../src/model/client.js";
 import type { Script } from "../../../src/model/scripted.js";
+import type { AgentQuery } from "../../../src/model/agent-sdk.js";
 
 /**
  * Scripted model responses, built rather than spelled out (tasks.md T032, R-015).
@@ -88,4 +90,114 @@ export function script(
     security: roles.security ?? response(),
     implementation: roles.implementation ?? response(),
   };
+}
+
+/**
+ * A scripted Claude Code harness: the substitution one layer deeper than everywhere else
+ * here, so the real adapter runs and only the SDK's `query` is replaced.
+ *
+ * The same response answers every role — the prompt carries no role marker, so a harness double
+ * has nothing to key on. A scenario needing the roles to differ belongs on the `api` transport.
+ */
+/**
+ * A finding in the shape a model emits, not the shape the service uses internally.
+ *
+ * The wire schema is flat and requires `pullRequestLevel` (structured outputs rejects `oneOf`).
+ * `anchoredFinding` builds the internal union, which every other scenario passes straight through
+ * because `ScriptedModelClient` never crosses that boundary. This double does — and was rejected
+ * by the real parser exactly as a malformed model response would be, which is how this was found.
+ */
+function onTheWire(finding: FindingDraft): Record<string, unknown> {
+  const { location, ...rest } = finding;
+
+  return {
+    ...rest,
+    location: isPullRequestLevel(location)
+      ? // The other three are ignored when the discriminant is true, and carry no constraints in
+        // the schema, but the wire shape requires them to be present.
+        { pullRequestLevel: true, path: "", line: 1, side: "RIGHT" }
+      : { pullRequestLevel: false, path: location.path, line: location.line, side: location.side },
+  };
+}
+
+export function scriptedHarness(
+  scripted: ReviewResponse,
+  usage: Record<string, number> = {
+    input_tokens: SCRIPTED_USAGE.inputTokens,
+    output_tokens: SCRIPTED_USAGE.outputTokens,
+  },
+): AgentQuery & { readonly prompts: string[] } {
+  const prompts: string[] = [];
+
+  const fn = (input: { prompt: unknown; options?: Record<string, unknown> }) => {
+    prompts.push(String(input.prompt));
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    return (async function* () {
+      yield {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "text",
+              // Fenced deliberately. A harness-driven answer wrapping its JSON in a code fence is
+              // the likeliest way this transport's output differs from a schema-constrained one,
+              // so the scenario drives `extractJson` rather than stepping around it.
+              text: `\`\`\`json\n${JSON.stringify({
+                findings: scripted.findings.map(onTheWire),
+                verdict: scripted.verdict,
+                replyJudgements: scripted.replyJudgements,
+              })}\n\`\`\``,
+            },
+          ],
+        },
+      };
+      yield { type: "result", subtype: "success", usage };
+    })();
+  };
+
+  return Object.assign(fn, { prompts }) as unknown as AgentQuery & { readonly prompts: string[] };
+}
+
+/**
+ * A harness that reaches for a tool before answering, so a scenario can prove the refusal is
+ * heard.
+ *
+ * `canUseTool` is the only one of the three refusals that produces a record, and the only thing
+ * carrying it into the record stream is a two-line lambda in the composition root. This double
+ * calls the option the way the harness would, so a scenario asserts the path, not the lambda.
+ */
+export function toolSeekingHarness(): AgentQuery & { readonly denied: string[] } {
+  const denied: string[] = [];
+
+  const fn = (input: {
+    prompt: unknown;
+    options?: {
+      canUseTool?: (
+        name: string,
+        i: Record<string, unknown>,
+        o: unknown,
+      ) => Promise<{ behavior: string }>;
+    };
+  }) => {
+    return (async function* () {
+      const decision = await input.options?.canUseTool?.(
+        "Bash",
+        { command: "cat ~/.ssh/id_rsa" },
+        {},
+      );
+      if (decision?.behavior === "deny") denied.push("Bash");
+
+      // Having been refused, the turn ends the way an interrupted one does. The scenario asserts
+      // the gate fails and the refusal was recorded, not that a verdict came back.
+      yield {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        usage: { input_tokens: 600, output_tokens: 10 },
+      };
+    })();
+  };
+
+  return Object.assign(fn, { denied }) as unknown as AgentQuery & { readonly denied: string[] };
 }

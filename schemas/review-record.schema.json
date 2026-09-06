@@ -46,6 +46,7 @@
         "finding.posted",
         "finding.resolved",
         "location.rejected",
+        "tool.refused",
         "finding.waiver_requested",
         "roles.contradiction_recorded",
         "roles.disagreement_escalated",
@@ -121,6 +122,15 @@
       "properties": {
         "path": { "type": "string" },
         "reason": { "type": "string" }
+      }
+    },
+    "tool": {
+      "description": "A tool the reviewer was offered and refused on the agent-sdk transport. Expected never to appear: the reviewer runs with no tools, so a record here means reviewed content asked one to act (FR-036).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" }
       }
     },
     "finding": {

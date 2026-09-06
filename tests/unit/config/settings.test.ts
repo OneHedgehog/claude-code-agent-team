@@ -129,6 +129,7 @@ describe("optional settings (FR-054)", () => {
 
     expect(loaded.effectiveOptionalSettings).toEqual({
       modelEffort: "high",
+      modelTransport: "api",
       "escalationChannel.label": "escalation",
     });
   });
@@ -144,6 +145,7 @@ describe("optional settings (FR-054)", () => {
     expect(loaded.settings.modelEffort).toBe("max");
     expect(loaded.effectiveOptionalSettings).toEqual({
       modelEffort: "max",
+      modelTransport: "api",
       "escalationChannel.label": "urgent",
     });
   });
@@ -157,5 +159,25 @@ describe("optional settings (FR-054)", () => {
 
   it("still rejects an invalid optional value rather than falling back to the default", () => {
     expect(() => validateSettings(validFile({ modelEffort: "exhaustive" }))).toThrow(SettingsError);
+  });
+});
+
+describe("the model transport is an optional setting (FR-054)", () => {
+  it("defaults to the metered API rather than silently changing how a run is billed", () => {
+    // The default must stay `api`: switching transport changes which account pays and weakens the
+    // response contract from a schema guarantee to a parsed instruction. Neither should happen to
+    // an operator who did not ask for it.
+    expect(validateSettings(validFile()).settings.modelTransport).toBe("api");
+  });
+
+  it("accepts agent-sdk and reports it as effective", () => {
+    const loaded = validateSettings(validFile({ modelTransport: "agent-sdk" }));
+
+    expect(loaded.settings.modelTransport).toBe("agent-sdk");
+    expect(loaded.effectiveOptionalSettings).toMatchObject({ modelTransport: "agent-sdk" });
+  });
+
+  it("refuses a transport the schema does not declare", () => {
+    expect(() => validateSettings(validFile({ modelTransport: "carrier-pigeon" }))).toThrow();
   });
 });
