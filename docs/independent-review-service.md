@@ -250,7 +250,10 @@ rounds than it passed. The second ask says the first reply was discarded and rep
 does not carry the rejected reply back. Nothing else is retried: an unauthenticated host, a
 subscription limit, a deadline and a refused tool are states a second identical ask cannot improve.
 Both attempts are charged, and both share one wall-clock bound rather than each getting a fresh
-one. This narrows the gap between the transports rather than closing it.
+one. Every retry emits `model.schema_retry`, carrying the attempt index in `attempt` — not `round`,
+which means the review round everywhere else — and the role that hit it. That record is the number
+to watch: a rate climbing over time is this transport's disclosed weakness getting worse. This
+narrows the gap between the transports rather than closing it.
 
 A harness that authenticates against the metered API balance instead of the subscription — the
 failure FR-063 exists to prevent — says so by name rather than arriving as a generic call failure.

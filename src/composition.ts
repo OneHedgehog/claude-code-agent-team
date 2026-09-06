@@ -629,7 +629,14 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           // Under its own name, not `round`: `round` means the review round everywhere else in the
           // record, so filing an attempt index there would make a log query read a retry as a
           // review round -- and this event exists to be counted (FR-075).
-          onSchemaRetry: (attempt) => logger.warn("model.schema_retry", { attempt }),
+          onSchemaRetry: (attempt, role) =>
+            logger.warn("model.schema_retry", {
+              attempt,
+              // Attributable rather than merely counted: the rate is the argument for the feature,
+              // and a number an operator cannot pin to a role tells them less than one they can.
+              // The pull request and revision reach the record through the run's own fields.
+              role: role as "security" | "implementation",
+            }),
         })
       : modelCredential === null
         ? unavailableModel(MISSING_CREDENTIAL_REASON)

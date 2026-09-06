@@ -623,13 +623,15 @@ describe("what the root wires to the real adapter (Principle II)", () => {
     await reviewPullRequest(adapters, 7, { runId: "run-retry" });
 
     const retries = records
-      .map((line) => JSON.parse(line) as { event: string; attempt?: number })
+      .map((line) => JSON.parse(line) as { event: string; attempt?: number; role?: string })
       .filter((record) => record.event === "model.schema_retry");
 
     // One per role: each is asked twice, and each reports the first ask as the one that missed.
     expect(retries).toHaveLength(2);
     // Under `attempt`, not `round` -- `round` means the review round everywhere else.
     expect(retries[0]?.attempt).toBe(1);
+    // And attributable to a role, so the rate can be pinned rather than only counted (FR-075).
+    expect(retries.map((r) => r.role).sort()).toEqual(["implementation", "security"]);
   });
 
   it("records location.rejected when the real adapter refuses a path", async () => {

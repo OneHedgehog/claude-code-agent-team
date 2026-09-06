@@ -517,15 +517,16 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
   });
 
   it("reports the retry, since it is the only number saying the weakness is getting worse", async () => {
-    const attempts: number[] = [];
+    const attempts: string[] = [];
     const harness = thenAnswers("not json", WELL_FORMED);
 
     await new AgentSdkModelClient({
       agentQuery: harness,
-      onSchemaRetry: (attempt) => attempts.push(attempt),
+      onSchemaRetry: (attempt, role) => attempts.push(`${role}:${attempt}`),
     }).review(request());
 
-    expect(attempts).toEqual([1]);
+    // Attributable, not merely counted: an operator watching the rate needs to know whose it is.
+    expect(attempts).toEqual(["security:1"]);
   });
 
   it("tells the model its reply was discarded, rather than repeating the question", async () => {
