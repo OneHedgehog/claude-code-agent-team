@@ -371,8 +371,9 @@ conditional. A tick that selects nothing used to log nothing, so a daemon idling
 daemon that had died produced identical output: none. That is not hypothetical -- one ran for
 twenty-four minutes, exited, and recorded neither the idling nor the exit; the only way to tell the
 difference at any point was `ps`. A level-triggered design makes a crash cheap to recover from, but
-only if somebody finds out about it. The record costs nothing against the platform budget: a `304`
-is free, and this is not a request at all.
+only if somebody finds out about it. The record costs nothing against the *rate limit*: a `304` is
+free, and this is not a request at all. It does cost disk, which is why the per-pull-request list is
+suppressed when unchanged.
 
 **State lives on GitHub, not on disk.** Round history, spend, and the excluded-path count are written
 into each round's check-run output, so the next round rebuilds them from GitHub alone. The local
