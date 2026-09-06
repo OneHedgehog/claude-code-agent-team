@@ -10,6 +10,7 @@ import {
   REVIEW_MODEL,
   REVIEW_RESPONSE_SCHEMA,
   type RejectedLocation,
+  type ReviewPrompt,
 } from "./anthropic.js";
 import {
   ModelError,
@@ -34,6 +35,24 @@ import {
 
 /** The single turn a review takes. There is no loop here: one question, one answer, no tools. */
 const MAX_TURNS = 1;
+
+/**
+ * How many times the harness is asked before the review is recorded as having no verdict.
+ *
+ * The API transport made a schema violation impossible; this one makes it rejected, and the
+ * observed rejection rate is high enough that a single attempt loses roughly a third of role-calls
+ * (FR-068). One retry is the difference between a gate that passes when both roles happen to comply
+ * and one that passes routinely. Two, not more: a model that misses the schema twice given the
+ * schema and its own failure is not going to be talked round by a third ask, and every attempt
+ * spends.
+ */
+const MAX_ATTEMPTS = 2;
+
+/** What the retry adds, so the second ask is better informed than a repetition of the first. */
+const SCHEMA_CORRECTION =
+  "Your previous reply did not validate against the schema and was discarded. Reply again with a " +
+  "single JSON object matching it exactly -- no prose, no code fence, no properties the schema " +
+  "does not name, and every required property present.";
 
 /** The wall-clock bound, and what it costs an operator: FR-066. */
 const DEADLINE_MS = 15 * 60 * 1000;
@@ -102,6 +121,8 @@ export interface AgentSdkOptions {
    * if it does, a reviewed diff persuaded a tool-less reviewer to reach for a tool (FR-024).
    */
   readonly onRefusedTool?: (toolName: string) => void;
+  /** Told when a reply missed the schema and the harness is being asked again (FR-068). */
+  readonly onSchemaRetry?: (attempt: number) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
   readonly env?: Record<string, string | undefined>;
   /** How long the harness may take. Overridden by tests so a deadline case need not wait minutes. */
@@ -197,6 +218,7 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #query: AgentQuery;
   readonly #onRejectedLocation: RejectedLocation | undefined;
   readonly #onRefusedTool: ((toolName: string) => void) | undefined;
+  readonly #onSchemaRetry: ((attempt: number) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
   readonly #deadlineMs: number;
 
@@ -204,6 +226,7 @@ export class AgentSdkModelClient implements ModelClient {
     this.#query = options.agentQuery ?? query;
     this.#onRejectedLocation = options.onRejectedLocation;
     this.#onRefusedTool = options.onRefusedTool;
+    this.#onSchemaRetry = options.onSchemaRetry;
     this.#env = options.env ?? process.env;
     this.#deadlineMs = options.deadlineMs ?? DEADLINE_MS;
   }
@@ -231,6 +254,43 @@ export class AgentSdkModelClient implements ModelClient {
       outputTokens: 0,
     };
 
+    let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const response = await this.#ask(
+          request,
+          prompt,
+          // The second ask carries the schema, the first reply's fate, and nothing from the first
+          // reply itself -- a model that emitted prose must not have its prose fed back as context.
+          attempt === 1 ? sent : `${sent}\n\n${SCHEMA_CORRECTION}`,
+          floor,
+        );
+
+        return { ...response, usage: add(spent, response.usage) };
+      } catch (error) {
+        const usage = error instanceof ModelError ? error.usage : floor;
+        spent = add(spent, usage);
+
+        // Only a schema violation is worth asking again. An unauthenticated host, a subscription
+        // limit, a deadline and a refused tool are all states a second identical ask cannot
+        // improve, and retrying a limit makes it worse (FR-068).
+        if (attempt >= MAX_ATTEMPTS || !isSchemaViolation(error)) {
+          throw error instanceof ModelError ? new ModelError(error.message, spent) : error;
+        }
+
+        this.#onSchemaRetry?.(attempt);
+      }
+    }
+  }
+
+  /** One ask, from spawning the harness to a validated response. Retried only on FR-068. */
+  async #ask(
+    request: ReviewRequest,
+    prompt: ReviewPrompt,
+    sent: string,
+    floor: ModelUsage,
+  ): Promise<ReviewResponse> {
     let text = "";
     // `null`, not a zeroed total: "never said" and "said nothing was spent" are different (FR-062).
     let usage: ModelUsage | null = null;
@@ -364,6 +424,29 @@ export class AgentSdkModelClient implements ModelClient {
       usage,
     };
   }
+}
+
+/** Two usages summed, so a retried review reports what both attempts cost (FR-068, FR-031). */
+function add(a: ModelUsage, b: ModelUsage): ModelUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}
+
+/**
+ * Whether a failure was the model missing the schema, rather than anything a retry cannot mend.
+ *
+ * Keyed on the parser's own message rather than on an error subclass, because `parseReviewResponse`
+ * is shared with the API transport and giving it a new error type would change that path too. The
+ * cost of getting this wrong is bounded in the safe direction: a miscategorised failure is asked
+ * once more and then reported exactly as it would have been.
+ */
+function isSchemaViolation(error: unknown): boolean {
+  return (
+    error instanceof ModelError &&
+    /(did not satisfy the review schema|was not JSON|carried no text content)/.test(error.message)
+  );
 }
 
 /**

@@ -39,6 +39,7 @@ export const REVIEW_EVENTS = [
   "finding.resolved",
   "location.rejected",
   "tool.refused",
+  "model.schema_retry",
   "finding.waiver_requested",
   "roles.contradiction_recorded",
   "roles.disagreement_escalated",

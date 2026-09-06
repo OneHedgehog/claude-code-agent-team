@@ -465,6 +465,89 @@ describe("the response is consumed through the schema, exactly as on the API tra
   });
 });
 
+describe("a reply that misses the schema is asked again, once (FR-068)", () => {
+  /** Answers with `first` on the opening ask and `second` afterwards, recording every prompt. */
+  function thenAnswers(first: string, second: string) {
+    const prompts: string[] = [];
+    const fn = (input: { prompt: unknown }) => {
+      prompts.push(String(input.prompt));
+      const text = prompts.length === 1 ? first : second;
+
+      // eslint-disable-next-line @typescript-eslint/require-await
+      return (async function* () {
+        yield { type: "assistant", message: { content: [{ type: "text", text }] } };
+        yield {
+          type: "result",
+          subtype: "success",
+          usage: { input_tokens: 500, output_tokens: 25 },
+        };
+      })();
+    };
+
+    return Object.assign(fn, { prompts }) as unknown as AgentQuery & { prompts: string[] };
+  }
+
+  it("recovers a review whose first reply was prose", async () => {
+    // The API transport made this impossible through `output_config.format`. Here it is merely
+    // rejected — at a rate high enough that a single ask lost roughly a third of role-calls, and
+    // a green gate needs both roles to comply at once.
+    const harness = thenAnswers("I reviewed it and it looks fine.", WELL_FORMED);
+
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.verdict).toBe("request-changes");
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("tells the model its reply was discarded, rather than repeating the question", async () => {
+    const harness = thenAnswers("not json", WELL_FORMED);
+    await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(harness.prompts[1]).toContain("did not validate against the schema");
+    // And carries none of the rejected reply back: a model that emitted prose must not be handed
+    // its own prose as context.
+    expect(harness.prompts[1]).not.toContain("not json");
+  });
+
+  it("charges both attempts, since both were spent", async () => {
+    const harness = thenAnswers("not json", WELL_FORMED);
+    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+
+    expect(response.usage).toEqual({ inputTokens: 1_000, outputTokens: 50 });
+  });
+
+  it("gives up after the second miss rather than asking forever", async () => {
+    const harness = thenAnswers("not json", "still not json");
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: harness }).review(request()),
+    ).rejects.toThrow(ModelError);
+    expect(harness.prompts).toHaveLength(2);
+  });
+
+  it("does not retry a subscription limit, which a second ask only makes worse", async () => {
+    // The point of the predicate. An unauthenticated host, a limit, a deadline and a refused tool
+    // are all states an identical second ask cannot improve.
+    let asks = 0;
+    const limited = Object.assign(
+      () => {
+        asks += 1;
+
+        // eslint-disable-next-line require-yield, @typescript-eslint/require-await
+        return (async function* () {
+          throw new Error("You've hit your session limit");
+        })();
+      },
+      { calls: [] },
+    ) as unknown as AgentQuery;
+
+    await expect(
+      new AgentSdkModelClient({ agentQuery: limited }).review(request()),
+    ).rejects.toThrow(HARNESS_LIMIT_REACHED);
+    expect(asks).toBe(1);
+  });
+});
+
 describe("extractJson widens what is accepted, never what is trusted", () => {
   it("takes the object out of a fenced block", () => {
     expect(extractJson('```json\n{"verdict":"approve"}\n```')).toEqual({ verdict: "approve" });

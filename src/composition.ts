@@ -626,6 +626,10 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
           // Expected never to fire. If it does, a reviewed diff talked a tool-less reviewer into
           // reaching for a tool, and a run that stayed silent about that would be worthless.
           onRefusedTool: (toolName) => logger.warn("tool.refused", { tool: { name: toolName } }),
+          // Recorded because the retry is the difference between a gate that passes routinely and
+          // one that passes when both roles happen to comply; an operator watching the rate climb
+          // is watching this transport's disclosed weakness get worse (FR-068).
+          onSchemaRetry: (attempt) => logger.warn("model.schema_retry", { round: attempt }),
         })
       : modelCredential === null
         ? unavailableModel(MISSING_CREDENTIAL_REASON)
