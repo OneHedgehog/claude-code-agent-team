@@ -329,6 +329,14 @@ matching — a byte changed in the constitution, a breakpoint moved, a prefix th
 next review — bills full price and looks exactly like one that is working. `cacheReadTokens` sitting
 at zero across consecutive reviews is the only symptom there is, and nothing else would report it.
 
+That symptom has **one benign cause**, and reading it wrong costs an investigation. A breakpoint on
+a prefix shorter than the provider's minimum cacheable length is not rejected — it is silently
+ignored, the request succeeds, and both counters stay at zero. So a target whose constitution is
+short reports exactly what a broken cache reports, with everything working as intended. This
+repository's constitution is ~11,000 tokens, an order of magnitude clear of any minimum, but the
+service is addressed at a `--target` and nothing constrains another target's constitution to be
+long. Check its size before concluding the cache stopped matching.
+
 Cached tokens also count toward the metered total. The API reports `input_tokens` *excluding*
 anything served from or written to the cache, so summing input and output alone stopped being the
 whole bill the moment the breakpoint was added: a review reading 10,800 cached tokens would have

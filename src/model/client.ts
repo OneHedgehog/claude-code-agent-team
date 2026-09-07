@@ -86,6 +86,10 @@ export interface ModelUsage {
    * -- a byte changed in the constitution, a breakpoint moved, a prefix that fell out before the
    * next review -- costs full price and looks exactly like one that is working. `cacheReadTokens`
    * staying at zero across consecutive reviews is the symptom, and nothing else reports it.
+   *
+   * One benign cause reads identically: a breakpoint on a prefix below the provider's minimum
+   * cacheable length is ignored rather than rejected, so a target with a short constitution reports
+   * zeroes while everything here works. `docs/` says to check the constitution's size first.
    */
   readonly cacheWriteTokens: number;
   readonly cacheReadTokens: number;
