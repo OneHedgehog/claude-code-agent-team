@@ -353,8 +353,15 @@ saving hide the spend — the exact failure FR-031 exists to prevent.
 
 The consequence is that `tokensConsumed` measures tokens *processed*, not credit spent: a review
 reading 10,800 cached tokens draws 10,800 against the budget while costing roughly a tenth of that.
-That is deliberate. `tokenBudget` has always been a token count rather than a currency, and counting
-raw errs in the safe direction — the reserve trips earlier than the money requires, never later.
+That is deliberate. `tokenBudget` has always been a token count rather than a currency. Counting raw
+is conservative on the read side, which bills well below the input rate and is counted at face
+value — but **not universally**: an extended-TTL write bills *above* the input rate and is also
+counted at 1×, so the raw count is only conservative while reads comfortably exceed writes. The
+measured run above has writes equal to reads, one role writing the prefix and the other reading it
+back, which is precisely the regime where the write premium is not covered by the read discount; on
+that run the ledger meters slightly less credit than was spent, not more. The gap is small, and it
+is a bias rather than a safety property, which is why it is stated rather than relied on.
+
 Making the budget a cost proxy means weighting three different rates and deciding what it is
 denominated in, which is a change to what the setting means and belongs in its own spec.
 
