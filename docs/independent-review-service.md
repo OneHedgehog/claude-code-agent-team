@@ -312,7 +312,12 @@ deliberately *not* on the volatile half: caching a prefix that changes every rev
 write a cache nothing ever reads.
 
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
-prefix that has fallen out of cache costs full price to write again. The extended TTL is a versioned
+prefix that has fallen out of cache costs full price to write again. That is a trade, not a free
+upgrade: an extended-TTL write bills at a higher multiple of the base input rate than a default-TTL
+one, so the hour buys a lower expiry risk with a larger per-write premium. It pays only once gaps
+regularly exceed five minutes — on a workload where reviews arrive back to back it costs strictly
+more. `cacheWriteTokens` is recorded precisely so a later reader can check that against their own
+arrival pattern rather than taking this paragraph's word for it. The extended TTL is a versioned
 API capability, not a free parameter: `ttl: "1h"` is accepted by `@anthropic-ai/sdk` `^0.117.1` against
 the `2023-06-01` API version, and would be rejected or ignored by a surface that predates
 extended cache TTLs — so the range in `package.json` is load-bearing, not incidental — and being a caret on a `0.x`
