@@ -296,9 +296,12 @@ rather than a disclosure (FR-060).
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
-**The constitution is sent once and cached, not re-sent on every call.** It is around 11,000 tokens
-and byte-identical for every role, every round, and every pull request — and it was being
-transmitted in full on each one. Across one working session that was 54 calls carrying the same
+**The constitution is sent once and cached, not re-sent on every call.** It is byte-identical for
+every role, every round, and every pull request — and it was being transmitted in full on each one.
+Around 11,000 tokens by character count; the live run below measures the cached prefix at **15,427**,
+which is the figure to trust, since it came from the API rather than from a heuristic and covers the
+block's fences as well as its body. The estimate is what the arithmetic below was done with, so that
+arithmetic understates the saving rather than overstating it. Across one working session that was 54 calls carrying the same
 document, roughly a third of everything the service spent.
 
 Caching is a prefix match, so the prompt is now ordered by how often each part changes: the
@@ -333,7 +336,7 @@ That symptom has **one benign cause**, and reading it wrong costs an investigati
 a prefix shorter than the provider's minimum cacheable length is not rejected — it is silently
 ignored, the request succeeds, and both counters stay at zero. So a target whose constitution is
 short reports exactly what a broken cache reports, with everything working as intended. This
-repository's constitution is ~11,000 tokens, an order of magnitude clear of any minimum, but the
+repository's constitution measures 15,427 cached tokens, comfortably clear of any minimum, but the
 service is addressed at a `--target` and nothing constrains another target's constitution to be
 long. Check its size before concluding the cache stopped matching.
 
