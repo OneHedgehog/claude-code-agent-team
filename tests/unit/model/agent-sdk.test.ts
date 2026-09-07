@@ -557,25 +557,29 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     // then a retry charged on two of four fields. Both were caught by the compiler at rebase time
     // and by nothing else.
     //
-    // Asserted through `review()` rather than against the helper directly, so the invariant is
-    // pinned without a module-private function becoming exported for a test's sake.
-    const both = {
+    // Derived from the object rather than from a list of field names, so a field added to
+    // `ModelUsage` and forgotten in the sum fails here rather than passing an assertion that never
+    // mentioned it. Asserted through `review()`, so no module-private helper is exported for it.
+    const reported = {
       input_tokens: 5,
       output_tokens: 7,
       cache_creation_input_tokens: 11,
       cache_read_input_tokens: 13,
     };
-    const harness = thenAnswers("not json", WELL_FORMED, both);
 
-    const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
+    const once = await new AgentSdkModelClient({
+      agentQuery: thenAnswers(WELL_FORMED, WELL_FORMED, reported),
+    }).review(request());
+    const twice = await new AgentSdkModelClient({
+      agentQuery: thenAnswers("not json", WELL_FORMED, reported),
+    }).review(request());
 
-    // Every field doubled: two attempts, each reporting the same non-zero usage.
-    expect(response.usage).toEqual({
-      inputTokens: 10,
-      outputTokens: 14,
-      cacheWriteTokens: 22,
-      cacheReadTokens: 26,
-    });
+    const fields = Object.keys(once.usage) as (keyof typeof once.usage)[];
+    // The harness reported something under every field, or this would pass vacuously.
+    expect(fields.every((field) => once.usage[field] > 0)).toBe(true);
+    for (const field of fields) {
+      expect(twice.usage[field]).toBe(once.usage[field] * 2);
+    }
   });
 
   it("charges both attempts, since both were spent", async () => {
