@@ -366,8 +366,8 @@ examined no listing and so learned nothing about what is being passed over. Its 
 so a `304` and a tick over an empty repository read alike in the counts and are told apart by
 `unchanged`.
 
-It is the only unconditional record the service writes, and it exists because everything else is
-conditional. A tick that selects nothing used to log nothing, so a daemon idling correctly and a
+It is the only record the service writes that does not depend on finding work, and it exists
+because everything else does. A tick that selects nothing used to log nothing, so a daemon idling correctly and a
 daemon that had died produced identical output: none. That is not hypothetical -- one ran for
 twenty-four minutes, exited, and recorded neither the idling nor the exit; the only way to tell the
 difference at any point was `ps`. A level-triggered design makes a crash cheap to recover from, but
