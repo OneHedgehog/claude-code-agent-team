@@ -577,10 +577,14 @@ describe("prompt caching (the constitution is the only stable prefix)", () => {
     expect(blocks[0]?.text).toBe(
       "--- BEGIN CONSTITUTION ---\nCONSTITUTION BODY\n--- END CONSTITUTION ---\n\n",
     );
-    expect(blocks[1]?.text).toContain("--- BEGIN DIFF ---\nDIFF BODY\n--- END DIFF ---");
-    expect(blocks[1]?.text).toContain('"title":"T"');
-    expect(blocks[1]?.text).toContain(
-      "--- BEGIN PRIOR FINDINGS ---\n[]\n--- END PRIOR FINDINGS ---",
+    // Equality rather than three `toContain` calls. Containment pins the three sections but not
+    // the order they arrive in, nor the `\n\n` between them -- and order is exactly what a cache
+    // breakpoint is sensitive to, since anything that moves within the volatile block is still
+    // downstream of the prefix only as long as it stays downstream of it.
+    expect(blocks[1]?.text).toBe(
+      '--- BEGIN PULL REQUEST ---\n{"title":"T","body":"B","specPaths":[]}\n--- END PULL REQUEST ---\n\n' +
+        "--- BEGIN DIFF ---\nDIFF BODY\n--- END DIFF ---\n\n" +
+        "--- BEGIN PRIOR FINDINGS ---\n[]\n--- END PRIOR FINDINGS ---",
     );
   });
 });
