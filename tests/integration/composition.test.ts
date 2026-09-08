@@ -757,8 +757,9 @@ describe("both transports are composed, whichever one the repository operates on
 
 describe("the run record reports cache accounting (Principle IV)", () => {
   it("carries the per-role cache totals into the record's usage block", async () => {
-    // The stubs were widened so they typecheck; nothing read the recorded values back. Deleting
-    // the aggregation in the composition root left every test green.
+    // Why this test exists: before it, the stubs had been widened only so they typecheck, and
+    // nothing read the recorded values back -- deleting the aggregation in the composition root
+    // left every test green. That is the state this pins shut, not the state it describes.
     const records: string[] = [];
     const logger = createLogger({ runId: "run-cache", write: (line) => records.push(line) });
 

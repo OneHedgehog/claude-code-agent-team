@@ -171,9 +171,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "tokensConsumed": { "type": "integer", "minimum": 0 },
-        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
-        "cacheReadTokens": { "type": "integer", "minimum": 0 },
+        "tokensConsumed": {
+          "description": "The whole draw for the run, cached input included. Not additive with cacheWriteTokens or cacheReadTokens \u2014 those two are already inside it, and summing the three over-counts every cached review.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheWriteTokens": {
+          "description": "Cached input written on this run. A component of tokensConsumed, not an addition to it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheReadTokens": {
+          "description": "Cached input read back on this run. A component of tokensConsumed, not an addition to it. Zero across consecutive reviews is the symptom of a cache that has stopped matching \u2014 though it is also what a transport that sets no breakpoint of its own reports.",
+          "type": "integer",
+          "minimum": 0
+        },
         "budgetRemaining": { "type": "integer" },
         "platformRequestsUsed": { "type": "integer", "minimum": 0 },
         "platformRequestsRemaining": { "type": "integer" }

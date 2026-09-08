@@ -311,12 +311,30 @@ input rate, and the second role's call reads back what the first one wrote. The 
 deliberately *not* on the volatile half: caching a prefix that changes every review would pay to
 write a cache nothing ever reads.
 
+**The ordering is shared; the breakpoint is not.** Both transports build the same prompt through
+`buildReviewPrompt`, but only `AnthropicModelClient` sends it as two blocks and sets `cache_control`
+on the first. `AgentSdkModelClient` sends the concatenated `userContent` as one string and gets
+whatever caching the harness does on its own account — which is why its `readUsage` had to learn to
+report `cache_creation_input_tokens` and `cache_read_input_tokens` separately in this same change:
+those counters are the harness's, not this feature's. A run under the Agent SDK can therefore report
+a large `cacheWriteTokens` against a `cacheReadTokens` of zero without anything being wrong with the
+breakpoint, because the breakpoint was never in play. Read the counters against the transport the
+run used — the check run's summary names it under "Effective optional settings".
+
 An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
-prefix that has fallen out of cache costs full price to write again. That is a trade, not a free
-upgrade: an extended-TTL write bills at a higher multiple of the base input rate than a default-TTL
-one, so the hour buys a lower expiry risk with a larger per-write premium. It pays only once gaps
-regularly exceed five minutes — on a workload where reviews arrive back to back it costs strictly
-more. `cacheWriteTokens` is recorded precisely so a later reader can check that against their own
+prefix that has fallen out of cache must be written again — at a *premium*, not at full price, which
+is the more expensive half of the trade and the one it is easiest to state backwards. That is a
+trade, not a free upgrade: an extended-TTL write bills at a higher multiple of the base input rate
+than a default-TTL one, so the hour buys a lower expiry risk with a larger per-write premium.
+
+**It pays inside a band, not monotonically.** On the published ratios to base input — default-TTL
+write ≈1.25×, extended-TTL write ≈2×, read ≈0.1× — a review whose prefix `P` is cold costs one write
+plus one read across its two roles: **2.1P** at an hour, **1.35P** at the default, **2.0P** with no
+caching at all. So an *isolated* review — the "hours apart" end of the range above — is the case the
+hour serves worst, dearer even than not caching. The hour wins only when a later review lands while
+the prefix is still warm and reads it at 0.1×, which is to say when gaps run longer than five minutes
+and shorter than an hour; break-even sits near **1.7 reviews per hour**. That is very likely the real
+workload, and it is the opposite of what "reviews arrive hours apart" would suggest on its own. `cacheWriteTokens` is recorded precisely so a later reader can check that against their own
 arrival pattern rather than taking this paragraph's word for it. The extended TTL is a versioned
 API capability, not a free parameter: `ttl: "1h"` is accepted by `@anthropic-ai/sdk` `^0.117.1` against
 the `2023-06-01` API version, and would be rejected or ignored by a surface that predates
