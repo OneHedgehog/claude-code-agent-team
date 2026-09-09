@@ -4,7 +4,8 @@
 
 **Created**: 2026-09-06
 
-**Status**: Draft — records an override performed on
+**Status**: Recorded — final. The events it describes are complete, and Principle IX means this file
+is not rewritten. Records an override performed on
 [#9](https://github.com/OneHedgehog/claude-code-agent-team/pull/9)
 
 **Input**: The subscription-backed transport was merged without the merge gate ever reporting
@@ -43,8 +44,16 @@ the change:
 ## What was overridden, and what was not
 
 `main` required the `independent-review` context and one approving review, with `enforce_admins`
-enabled. Neither was satisfiable: the context had never gone green, and GitHub does not permit an
-author to approve their own pull request, so a sole maintainer cannot satisfy the second at all.
+enabled. Neither was satisfied, and the reasons differ.
+
+The context had never gone green. The approving review was missing for the same underlying reason,
+not for a structural one: GitHub does not permit an author to approve their own pull request, but
+the reviewer App is a separate identity and its approval *does* count — demonstrated on
+[#6](https://github.com/OneHedgehog/claude-code-agent-team/pull/6), where a review by
+`claude-agent-reviewer-app[bot]` alone moved the pull request to `APPROVED`. What blocked #9 was
+that the reviewer never produced a verdict across nine rounds, so it never approved anything. An
+earlier draft of this record said a sole maintainer "cannot satisfy the second at all", which would
+have enshrined a recoverable failure as a permanent property of the repository.
 
 The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled. **The gate's
 configuration was not changed** — not the required context, not the approving-review count, not
@@ -60,10 +69,35 @@ Deliberately *not* done, and named so that no future reader mistakes their absen
 
 ## Who approved it
 
-[@OneHedgehog](https://github.com/OneHedgehog), the repository owner, on 2026-09-06, having been
-told before deciding that the gate had never reported green, that a reviewer had failed on four of
-nine rounds, and that the alternative on offer was splitting `specs/003` into its own pull request
-to buy iteration room.
+**What the record can show.** [#9](https://github.com/OneHedgehog/claude-code-agent-team/pull/9) was
+merged at `2026-09-06T11:05:06Z` by the `OneHedgehog` account, as merge commit
+[`7e22757`](https://github.com/OneHedgehog/claude-code-agent-team/commit/7e22757e62). That is the
+whole of the verifiable trail.
+
+**What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
+the operator on #9. The last comment on the pull request is at `09:54:36Z`, fifty-one minutes before
+the merge, and it is an agent's round-7 reply; no comment follows the merge, and no human review was
+submitted. The approval was given out of band — in the terminal session driving the agent — and no
+artifact of it reached GitHub. **This record therefore contains no words of the approver's own**, and
+the paraphrase an earlier draft carried, describing what they "had been told before deciding", has
+been removed rather than kept: it was an agent's account of a human's reasoning, offered where the
+human's own testimony belongs.
+
+Two structural reasons it cannot be reconstructed after the fact, both worth naming because they
+will recur:
+
+- **The account is shared.** `OneHedgehog` is both the repository owner and the authoring agent's PAT
+  identity. Every comment on #9 was written by the agent under that account, including one that
+  addresses `@OneHedgehog` in the second person. The timeline cannot distinguish the human from the
+  agent, so no amount of reading it establishes who said what.
+- **There is no audit log.** `OneHedgehog` is a user account, not an organisation, and the audit-log
+  API answers `404`. The `enforce_admins` toggle — off, merge, on — left no retrievable record. Its
+  having happened is inferred from the merge succeeding against a gate that was never green.
+
+This is the weakest part of the record, and it is left visible instead of being written around. A
+Principle VI approval that survives only as an agent's summary is not a recorded human approval; it
+is a claim about one. The remedy is procedural and belongs to the next occurrence, not to this file:
+the operator states the reason in their own words, in a comment, before the override.
 
 Principle V requires a human on this merge independently of any of that: the change touches
 dependency manifests and the reviewer's own operating settings, and carries waived findings — three
@@ -73,7 +107,14 @@ routes to the same escalation floor.
 
 - It does not license an agent to perform this override. Principle V reserves it for a human, and
   the decision above was taken by one after the option was put to them.
-- It is spent. A second merge without a green gate needs its own record and its own approval.
+- It is spent. A second merge without a green gate needs its own record and its own approval — and,
+  on the standard set above, an approving comment written by the operator before the fact.
+- It does not close the structural cause. The reviewer's failures across #9's nine rounds were
+  subscription session limits and unsatisfied response schemas, both of which recur: the same two
+  faults blocked [#5](https://github.com/OneHedgehog/claude-code-agent-team/pull/5) and
+  [#6](https://github.com/OneHedgehog/claude-code-agent-team/pull/6) three days later. Until they are
+  fixed, the next sizeable pull request reaches the same impasse. That is a known-open defect, not a
+  standing licence to bypass the gate again.
 - It says nothing about the correctness of the findings that were declined rather than fixed. Those
   are argued on the pull request and stand or fall on their own.
 
