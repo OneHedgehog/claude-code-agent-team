@@ -79,19 +79,25 @@ export interface ModelUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   /**
-   * Tokens written to the prompt cache, billed above the input rate, and tokens served from it,
-   * billed well below it.
+   * Tokens written to the prompt cache, billed above the input rate. A component of the run's total
+   * draw, not an addition to it.
+   */
+  readonly cacheWriteTokens: number;
+  /**
+   * Tokens served from the prompt cache, billed well below the input rate. A component of the run's
+   * total draw, not an addition to it.
    *
    * Recorded because the saving is otherwise unobservable: a cache that silently stopped matching
    * -- a byte changed in the constitution, a breakpoint moved, a prefix that fell out before the
-   * next review -- costs full price and looks exactly like one that is working. `cacheReadTokens`
+   * next review -- costs full price and looks exactly like one that is working. This counter
    * staying at zero across consecutive reviews is the symptom, and nothing else reports it.
    *
-   * One benign cause reads identically: a breakpoint on a prefix below the provider's minimum
+   * Two benign causes read identically. A breakpoint on a prefix below the provider's minimum
    * cacheable length is ignored rather than rejected, so a target with a short constitution reports
-   * zeroes while everything here works. `docs/` says to check the constitution's size first.
+   * zeroes while everything here works -- `docs/` says to check the constitution's size first. And
+   * `AgentSdkModelClient` sets no breakpoint of its own, so under that transport these two counters
+   * are the harness's own accounting and a large write against a zero read means nothing is wrong.
    */
-  readonly cacheWriteTokens: number;
   readonly cacheReadTokens: number;
 }
 

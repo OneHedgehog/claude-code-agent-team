@@ -252,6 +252,11 @@ export interface ReviewPrompt {
    * The two parts concatenated exactly as the API concatenates them, so the guard tests assert
    * against the bytes the wire carries rather than a near-copy of them. The separator lives in
    * `cacheablePrefix`, which is what makes the two identical (FR-036).
+   *
+   * Not test-only, and not removable with the guards. `AgentSdkModelClient` sends *this* field as
+   * its single user message -- the harness takes one string and sets no breakpoint of its own -- so
+   * it is the production prompt on that transport while `cacheablePrefix` and `volatileContent`
+   * are the production prompt on this one.
    */
   readonly userContent: string;
 }
