@@ -340,10 +340,10 @@ non-failing, which is exactly the absent gate that reads as no objection. Every 
 is a `failure` with a reason. A run still waiting reports nothing at all rather than reporting
 something reassuring.
 
-**Every tick that completes writes one record, whether or not it found work.** The daemon emits a `tick.completed`
-record on each poll: whether the listing was a `304`, how many open pull requests the predicate
-considered, how many it selected, and -- for each one it passed over -- the cheap condition that
-excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
+**Every tick that completes writes one record, whether or not it found work.** The daemon emits a
+`tick.completed` record on each poll: whether the listing was a `304`, how many open pull requests
+the predicate considered, how many it selected, and -- for each one it passed over -- the cheap
+condition that excluded it (`no-reply-since-conclusion`, `gate-run-did-not-fail`, and so on).
 
 The record is written once the tick's decisions are made. A tick that fails before that -- a listing
 that throws, say -- currently records **nothing at all**: the exception propagates out of the loop,
@@ -353,22 +353,22 @@ continues. It is separate work and it has not been done; an operator looking for
 crashed tick will not find any here.
 
 The counts go out on every tick that completes; the per-pull-request list is written only when it
-differs from the tick before. A repository with a steady set of open pull requests would otherwise multiply that set
-into the record stream once a minute forever, and the JSONL cache is disk, which Principle IV meters
-like anything else. The unchanging detail carries nothing the previous tick did not; the counts are
-what prove the loop is alive, so those always go.
+differs from the tick before. A repository with a steady set of open pull requests would otherwise
+multiply that set into the record stream once a minute forever, and the JSONL cache is disk, which
+Principle IV meters like anything else. The unchanging detail carries nothing the previous tick did
+not; the counts are what prove the loop is alive, so those always go.
 
 Reading the list therefore needs one convention: an absent list means "unchanged since it was last
 written", never "nothing was skipped" -- those are different facts, and `skipped: []` states the
 second one explicitly. A `304` tick omits the list rather than claiming an empty one, because it
 examined no listing and so learned nothing about what is being passed over. Its `considered` and
-`selected` are both `0` for the same reason — they report what this tick examined, not what is open —
-so a `304` and a tick over an empty repository read alike in the counts and are told apart by
+`selected` are both `0` for the same reason — they report what this tick examined, not what is open
+— so a `304` and a tick over an empty repository read alike in the counts and are told apart by
 `unchanged`.
 
-It is the only record the service writes that does not depend on finding work, and it exists
-because everything else does. A tick that selects nothing used to log nothing, so a daemon idling correctly and a
-daemon that had died produced identical output: none. That is not hypothetical -- one ran for
+It is the only record the service writes that does not depend on finding work, and it exists because
+everything else does. A tick that selects nothing used to log nothing, so a daemon idling correctly
+and a daemon that had died produced identical output: none. That is not hypothetical -- one ran for
 twenty-four minutes, exited, and recorded neither the idling nor the exit; the only way to tell the
 difference at any point was `ps`. A level-triggered design makes a crash cheap to recover from, but
 only if somebody finds out about it. The record costs nothing against the *rate limit*: a `304` is
