@@ -693,7 +693,9 @@ describe("what the root wires to the real adapter (Principle II)", () => {
 });
 
 describe("the daemon's heartbeat (Principle VII)", () => {
-  /** Runs exactly one tick body: `runDaemon` consults `running()` once to enter and once to loop. */
+  /**
+   * Runs exactly one tick body: `runDaemon` consults `running()` once to enter and once to loop.
+   */
   function oneTick(): () => boolean {
     let calls = 0;
 
@@ -769,8 +771,9 @@ describe("the daemon's heartbeat (Principle VII)", () => {
 
   it("omits an unchanged skip list on the next tick, and keeps the counts", async () => {
     capture();
-    // Three tick bodies over the same steady set; the first two are what this asserts. The counts prove the loop is alive on both; repeating
-    // the identical list into the record stream every tick is disk spent on nothing (Principle IV).
+    // Three tick bodies over the same steady set; the first two are what this asserts. The
+    // counts prove the loop is alive on both; repeating the identical list into the record
+    // stream every tick is disk spent on nothing (Principle IV).
     const adapters = await adaptersListing(
       { pullRequests: [{ number: 31, headSha: "e".repeat(40) }], etag: 'W/"steady"' },
       (ref) => [passingGateRun(ref)],
