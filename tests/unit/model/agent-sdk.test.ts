@@ -560,6 +560,11 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     // Derived from the object rather than from a list of field names, so a field added to
     // `ModelUsage` and forgotten in the sum fails here rather than passing an assertion that never
     // mentioned it. Asserted through `review()`, so no module-private helper is exported for it.
+    //
+    // This pins the summation, not the routing: every reported value is distinct and the mapping is
+    // one-to-one, so a transposition inside `readUsage` would double just as correctly and pass
+    // here. "charges both attempts, since both were spent", below, is what holds each wire field to
+    // the `ModelUsage` field it belongs to. Neither test covers the other's ground.
     const reported = {
       input_tokens: 5,
       output_tokens: 7,

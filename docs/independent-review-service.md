@@ -327,14 +327,25 @@ is the more expensive half of the trade and the one it is easiest to state backw
 trade, not a free upgrade: an extended-TTL write bills at a higher multiple of the base input rate
 than a default-TTL one, so the hour buys a lower expiry risk with a larger per-write premium.
 
-**It pays inside a band, not monotonically.** On the published ratios to base input — default-TTL
-write ≈1.25×, extended-TTL write ≈2×, read ≈0.1× — a review whose prefix `P` is cold costs one write
-plus one read across its two roles: **2.1P** at an hour, **1.35P** at the default, **2.0P** with no
-caching at all. So an *isolated* review — the "hours apart" end of the range above — is the case the
-hour serves worst, dearer even than not caching. The hour wins only when a later review lands while
-the prefix is still warm and reads it at 0.1×, which is to say when gaps run longer than five minutes
-and shorter than an hour; break-even sits near **1.7 reviews per hour**. That is very likely the real
-workload, and it is the opposite of what "reviews arrive hours apart" would suggest on its own. `cacheWriteTokens` is recorded precisely so a later reader can check that against their own
+**It pays inside a band, not monotonically, and only on the transport that owns the breakpoint.**
+Everything in this paragraph is `AnthropicModelClient`: under the Agent SDK neither the 2× write
+premium nor the hour is in play, so a break-even read off *that* transport's counters would be a
+figure the harness produced under its own policy. On Anthropic's published prompt-caching multipliers
+of the base input rate — default-TTL write ≈1.25×, extended-TTL (1h) write ≈2×, cache read ≈0.1×, as
+documented for the `2023-06-01` API and read 2026-09 — a review whose prefix `P` is cold costs one
+write plus one read across its two roles: **2.1P** at an hour, **1.35P** at the default, **2.0P**
+with no caching at all. So an *isolated* review — the "hours apart" end of the range above — is the
+case the hour serves worst, dearer even than not caching. The hour wins only when a later review
+lands while the prefix is still warm and reads it at 0.1×, which is to say when gaps run longer than
+five minutes and shorter than an hour; break-even sits near **1.7 reviews per hour**. That is very
+likely the real workload, and it is the opposite of what "reviews arrive hours apart" would suggest
+on its own.
+
+Those three multipliers are the load-bearing input here and the only external numbers in this section
+not pinned by a test, which is why they carry a date: a later reader who finds them changed should
+suspect the conclusion before the arithmetic.
+
+`cacheWriteTokens` is recorded precisely so a later reader can check that against their own
 arrival pattern rather than taking this paragraph's word for it. The extended TTL is a versioned
 API capability, not a free parameter: `ttl: "1h"` is accepted by `@anthropic-ai/sdk` `^0.117.1` against
 the `2023-06-01` API version, and would be rejected or ignored by a surface that predates
