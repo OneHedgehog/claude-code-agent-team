@@ -55,10 +55,21 @@ that the reviewer never produced a verdict across nine rounds, so it never appro
 earlier draft of this record said a sole maintainer "cannot satisfy the second at all", which would
 have enshrined a recoverable failure as a permanent property of the repository.
 
-The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled. **The gate's
-configuration was not changed** — not the required context, not the approving-review count, not
-`maxReviewableDiffSize`. It is recorded as an administrator bypass rather than as a weakened gate,
-because that is what it was.
+The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled — stated on
+the operator's account and, for the first two steps, by inference from the merge having succeeded
+against a gate that was never green. The absence of an audit log (see "Who approved it") is why
+those two are inference rather than record, and this sentence is hedged where that section is
+candid; an unhedged version of it is the sentence a later reader would have quoted.
+
+**The third step is not inference.** `GET /repos/OneHedgehog/claude-code-agent-team/branches/main/protection`
+answers `enforce_admins.enabled: true`, read 2026-09-10, with `required_status_checks.contexts` still
+`["independent-review"]` and one required approving review. The protection is demonstrably back, and
+that is the claim which bounds this override's blast radius, so it is the one worth evidencing rather
+than asserting.
+
+**The gate's configuration was not changed** — not the required context, not the approving-review
+count, not `maxReviewableDiffSize`. It is recorded as an administrator bypass rather than as a
+weakened gate, because that is what it was.
 
 Deliberately *not* done, and named so that no future reader mistakes their absence for oversight:
 
@@ -66,6 +77,18 @@ Deliberately *not* done, and named so that no future reader mistakes their absen
   work is what Principle IV forbids and what this pull request already had to escalate once.
 - `required_status_checks.contexts` was not emptied.
 - The transport was not merged to a branch with the gate removed.
+
+**Feature gate 4 (Principle X, size) was satisfied, not crossed** — the second unsatisfied gate a
+reader reconciling this merge would otherwise be left to account for alone. #9 ran to roughly 2,000
+non-lockfile lines against a `maxPullRequestSize` of 400, and its description carried the stated
+irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
+re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
+test and specification each traceable to a specific finding. So gate 4 was met through the escape the
+principle provides, and only gates 2 and 5 — the never-green review context — were overridden.
+
+Note that `maxReviewableDiffSize` (FR-037, the service's refusal-to-review threshold) and
+`maxPullRequestSize` (Principle X, the merge gate) are distinct settings with distinct defaults. The
+two bullets above speak only to the former.
 
 ## Who approved it
 
@@ -128,4 +151,10 @@ Principle IV waiver anchored to six words about a licence.
 
 This is recorded as an open defect in the permanent record rather than resolved, because resolving
 it means an operator stating in their own words what they approved, and an agent reconstructing that
-more persuasively would make the record worse. It can still be closed by an amendment to spec 003.
+more persuasively would make the record worse.
+
+It can still be closed, and the mechanism matters: **by a new spec that cites 003 and closes waiver
+2, filed under `specs/` as its own record** — not by editing
+`specs/003-subscription-backed-transport/spec.md` in place. An earlier draft of this line said
+"an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
+reason for existing forbids. Records supersede; they are not revised.
