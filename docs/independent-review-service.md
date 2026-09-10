@@ -296,6 +296,104 @@ rather than a disclosure (FR-060).
 double and nothing else mocked. Findings come back through structured outputs rather than prose, so
 no test ever asserts on generated wording.
 
+**The constitution is sent once and cached, not re-sent on every call.** It is byte-identical for
+every role, every round, and every pull request — and it was being transmitted in full on each one.
+Around 11,000 tokens by character count; the live run below measures the cached prefix at **15,427**,
+which is the figure to trust, since it came from the API rather than from a heuristic and covers the
+block's fences as well as its body. The estimate is what the arithmetic below was done with, so that
+arithmetic understates the saving rather than overstating it. Across one working session that was 54 calls carrying the same
+document, roughly a third of everything the service spent.
+
+Caching is a prefix match, so the prompt is now ordered by how often each part changes: the
+injection guard and the constitution first, with an hour-long cache breakpoint after them, and the
+pull request, the diff, and prior findings after it. A cached prefix bills at about a tenth of the
+input rate, and the second role's call reads back what the first one wrote. The breakpoint is
+deliberately *not* on the volatile half: caching a prefix that changes every review would pay to
+write a cache nothing ever reads.
+
+**The ordering is shared; the breakpoint is not.** Both transports build the same prompt through
+`buildReviewPrompt`, but only `AnthropicModelClient` sends it as two blocks and sets `cache_control`
+on the first. `AgentSdkModelClient` sends the concatenated `userContent` as one string and gets
+whatever caching the harness does on its own account — which is why its `readUsage` had to learn to
+report `cache_creation_input_tokens` and `cache_read_input_tokens` separately in this same change:
+those counters are the harness's, not this feature's. A run under the Agent SDK can therefore report
+a large `cacheWriteTokens` against a `cacheReadTokens` of zero without anything being wrong with the
+breakpoint, because the breakpoint was never in play. Read the counters against the transport the
+run used — the check run's summary names it under "Effective optional settings".
+
+An hour rather than the default five minutes, because reviews arrive minutes to hours apart and a
+prefix that has fallen out of cache must be written again — at a *premium*, not at full price, which
+is the more expensive half of the trade and the one it is easiest to state backwards. That is a
+trade, not a free upgrade: an extended-TTL write bills at a higher multiple of the base input rate
+than a default-TTL one, so the hour buys a lower expiry risk with a larger per-write premium.
+
+**It pays inside a band, not monotonically, and only on the transport that owns the breakpoint.**
+Everything in this paragraph is `AnthropicModelClient`: under the Agent SDK neither the 2× write
+premium nor the hour is in play, so a break-even read off *that* transport's counters would be a
+figure the harness produced under its own policy. On Anthropic's published prompt-caching multipliers
+of the base input rate — default-TTL write ≈1.25×, extended-TTL (1h) write ≈2×, cache read ≈0.1×, as
+documented for the `2023-06-01` API and read 2026-09 — a review whose prefix `P` is cold costs one
+write plus one read across its two roles: **2.1P** at an hour, **1.35P** at the default, **2.0P**
+with no caching at all. So an *isolated* review — the "hours apart" end of the range above — is the
+case the hour serves worst, dearer even than not caching. The hour wins only when a later review
+lands while the prefix is still warm and reads it at 0.1×, which is to say when gaps run longer than
+five minutes and shorter than an hour; break-even sits near **1.7 reviews per hour**. That is very
+likely the real workload, and it is the opposite of what "reviews arrive hours apart" would suggest
+on its own.
+
+Those three multipliers are the load-bearing input here and the only external numbers in this section
+not pinned by a test, which is why they carry a date: a later reader who finds them changed should
+suspect the conclusion before the arithmetic.
+
+`cacheWriteTokens` is recorded precisely so a later reader can check that against their own
+arrival pattern rather than taking this paragraph's word for it. The extended TTL is a versioned
+API capability, not a free parameter: `ttl: "1h"` is accepted by `@anthropic-ai/sdk` `^0.117.1` against
+the `2023-06-01` API version, and would be rejected or ignored by a surface that predates
+extended cache TTLs — so the range in `package.json` is load-bearing, not incidental — and being a caret on a `0.x`
+package, it already excludes the minor bump that would be the likeliest way to lose the
+capability silently. A live run reported `cacheWrite` and
+`cacheRead` of 15,427 tokens each, the second role reading back exactly the prefix the first wrote,
+so the request shape is accepted rather than rejected.
+
+That evidence does not, on its own, show the *hour* is honoured: both roles of one review ran
+minutes apart, well inside the five-minute default, so an ignored `ttl` would look identical within
+a single run. What distinguishes them is a cache read on a run that starts more than five minutes
+after the previous one — visible in the counters, and the reason they are recorded at all.
+
+**And the saving is recorded, because otherwise it is invisible.** Each run's record carries
+`cacheWriteTokens` and `cacheReadTokens` beside `tokensConsumed`. A cache that quietly stopped
+matching — a byte changed in the constitution, a breakpoint moved, a prefix that expired before the
+next review — bills full price and looks exactly like one that is working. `cacheReadTokens` sitting
+at zero across consecutive reviews is the only symptom there is, and nothing else would report it.
+
+That symptom has **one benign cause**, and reading it wrong costs an investigation. A breakpoint on
+a prefix shorter than the provider's minimum cacheable length is not rejected — it is silently
+ignored, the request succeeds, and both counters stay at zero. So a target whose constitution is
+short reports exactly what a broken cache reports, with everything working as intended. This
+repository's constitution measures 15,427 cached tokens, comfortably clear of any minimum, but the
+service is addressed at a `--target` and nothing constrains another target's constitution to be
+long. Check its size before concluding the cache stopped matching.
+
+Cached tokens also count toward the metered total. The API reports `input_tokens` *excluding*
+anything served from or written to the cache, so summing input and output alone stopped being the
+whole bill the moment the breakpoint was added: a review reading 10,800 cached tokens would have
+recorded around 2,000. Cheaper is not free, and a ledger that under-counted would have let the
+saving hide the spend — the exact failure FR-031 exists to prevent.
+
+The consequence is that `tokensConsumed` measures tokens *processed*, not credit spent: a review
+reading 10,800 cached tokens draws 10,800 against the budget while costing roughly a tenth of that.
+That is deliberate. `tokenBudget` has always been a token count rather than a currency. Counting raw
+is conservative on the read side, which bills well below the input rate and is counted at face
+value — but **not universally**: an extended-TTL write bills *above* the input rate and is also
+counted at 1×, so the raw count is only conservative while reads comfortably exceed writes. The
+measured run above has writes equal to reads, one role writing the prefix and the other reading it
+back, which is precisely the regime where the write premium is not covered by the read discount; on
+that run the ledger meters slightly less credit than was spent, not more. The gap is small, and it
+is a bias rather than a safety property, which is why it is stated rather than relied on.
+
+Making the budget a cost proxy means weighting three different rates and deciding what it is
+denominated in, which is a change to what the setting means and belongs in its own spec.
+
 **A response is capped by the model's ceiling, and the budget reserves that cap.** A single response
 may emit at most `MAX_OUTPUT_TOKENS` (16,000) -- the documented non-streaming ceiling that stays
 inside the SDK's HTTP timeout -- and a caller asking for more is clamped rather than trusted, because

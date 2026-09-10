@@ -25,8 +25,19 @@ import type { AgentQuery } from "../../../src/model/agent-sdk.js";
  * The usage every scripted response reports. Non-zero on purpose: a scenario that asserts tokens
  * were spent, and one that asserts they were not, must be able to tell the two apart, and a double
  * reporting zero would make every run look like a run that stopped before spending (FR-031).
+ *
+ * `totalTokens` sums all four fields, so what a budget-shaped scenario draws against is the total
+ * rather than the input figure alone — adding to the cache counters changes what one scripted role
+ * costs, which is the number a reserve or a halt is measured against.
  */
-export const SCRIPTED_USAGE = { inputTokens: 1_000, outputTokens: 100 } as const;
+export const SCRIPTED_USAGE = {
+  inputTokens: 1_000,
+  outputTokens: 100,
+  // Non-zero, so the e2e layer exercises the path a real review takes: the constitution is a cached
+  // prefix, and every scenario that asserts on spend would otherwise only ever see a cold call.
+  cacheWriteTokens: 200,
+  cacheReadTokens: 800,
+} as const;
 
 export interface FindingOptions {
   readonly rule?: string;
