@@ -22,7 +22,9 @@ puts that record under `specs/`, which is never rewritten, rather than in `docs/
 [#9](https://github.com/OneHedgehog/claude-code-agent-team/pull/9) was reviewed **nine times** by
 the service, through the transport it adds, on a host with no API credential. Every blocking finding
 raised across those rounds was fixed or declined with a stated justification, and the replies are on
-the pull request.
+the pull request. Nine sat inside the configured bound: `maxReviewRounds` was — and still is — ten,
+so the round cap was not exhausted and feature gate 5's exhausted-rounds escalation was never
+triggered. What follows is therefore not a story about running out of rounds.
 
 The gate never reported green, for two reasons that are properties of the situation rather than of
 the change:
@@ -62,7 +64,7 @@ answered — so the App never reached an approving review, rather than never spe
 drafts of this record got this wrong in opposite directions: one said a sole maintainer "cannot
 satisfy the second at all", enshrining a recoverable failure as a permanent property of the
 repository; the other said the reviewer "never produced a verdict across nine rounds", which
-contradicts the count four paragraphs above and would have credited the transport with producing
+contradicts the count three paragraphs above and would have credited the transport with producing
 nothing.
 
 The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled — stated on
@@ -99,15 +101,16 @@ test and specification each traceable to a specific finding. So gate 4 was met t
 principle provides.
 
 **The remaining gates, so that "gate 5" is an accounting rather than an assertion.** Gate 1 (lint,
-format, types) and gate 2 are covered by the `check` run below. Gate 3 (the feature's document under
-`docs/`, present in the same pull request) was met: #9 modified `docs/independent-review-service.md`
-in its own diff. Gate 6 was met: #9's description carried both its spec link and an authoring run
-identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is the one this record cannot settle**
-— it is human approval, and "Who approved it" below states plainly that no artifact of it reached
-GitHub. So what was *overridden* is gate 5, the never-green review context and the approving review
-it would have carried; gate 7 was not overridden so much as left unevidenced, and saying "gate 5
-alone" without that distinction would assert the very thing the strongest section of this file
-declines to assert.
+format, types) is covered by the `check` run below, and gate 2 by the same run so far as a pull
+request can evidence it — the qualification the next paragraph makes, not a fuller claim than it.
+Gate 3 (the feature's document under `docs/`, present in the same pull request) was met: #9 modified
+`docs/independent-review-service.md` in its own diff. Gate 6 was met: #9's description carried both
+its spec link and an authoring run identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is
+the one this record cannot settle** — it is human approval, and "Who approved it" below states
+plainly that no artifact of it reached GitHub. So what was *overridden* is gate 5, the never-green
+review context and the approving review it would have carried; gate 7 was not overridden so much as
+left unevidenced, and saying "gate 5 alone" without that distinction would assert the very thing the
+strongest section of this file declines to assert.
 
 **Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
 head `e758e13` at `2026-09-06T10:11:41Z`, fifty-three minutes before the merge; that command covers
