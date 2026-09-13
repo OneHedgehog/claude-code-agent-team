@@ -7,6 +7,7 @@ import {
   fixtureEnvironment,
   requireFixtureEnvironment,
   runReview,
+  SCRIPTED_USAGE,
   statusOf,
   type FixtureClient,
   type FixturePullRequest,
@@ -33,13 +34,13 @@ const APPROVING = {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100 },
+    usage: SCRIPTED_USAGE,
   },
   implementation: {
     findings: [],
     verdict: "approve" as const,
     replyJudgements: [],
-    usage: { inputTokens: 1_000, outputTokens: 100 },
+    usage: SCRIPTED_USAGE,
   },
 };
 

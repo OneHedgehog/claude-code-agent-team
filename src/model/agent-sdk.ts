@@ -19,6 +19,7 @@ import {
   type ReviewRequest,
   type ReviewResponse,
   CHARS_PER_TOKEN,
+  ZERO_USAGE,
 } from "./client.js";
 
 /**
@@ -204,13 +205,15 @@ function readUsage(raw: unknown): ModelUsage {
     | undefined;
   const count = (value: unknown): number => (typeof value === "number" ? value : 0);
 
-  // Cached tokens are still tokens the run consumed; dropping them would under-count (FR-031).
+  // Reported apart rather than folded into `inputTokens`, which is what this did before
+  // `ModelUsage` carried the cache fields. `totalTokens` now sums all four, so folding here would
+  // count the cached half twice -- and the two changes were written on separate branches, so
+  // nothing would have caught it but the compiler noticing the missing fields (FR-031).
   return {
-    inputTokens:
-      count(usage?.input_tokens) +
-      count(usage?.cache_creation_input_tokens) +
-      count(usage?.cache_read_input_tokens),
+    inputTokens: count(usage?.input_tokens),
     outputTokens: count(usage?.output_tokens),
+    cacheWriteTokens: count(usage?.cache_creation_input_tokens),
+    cacheReadTokens: count(usage?.cache_read_input_tokens),
   };
 }
 
@@ -252,9 +255,13 @@ export class AgentSdkModelClient implements ModelClient {
     const floor: ModelUsage = {
       inputTokens: Math.ceil((prompt.systemPrompt.length + sent.length) / CHARS_PER_TOKEN),
       outputTokens: 0,
+      // The harness may have written or read a cache prefix before it died; this is a floor, and
+      // claiming a figure it cannot know would be worse than under-counting (FR-067).
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
     };
 
-    let spent: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+    let spent: ModelUsage = ZERO_USAGE;
 
     // The wall-clock bound covers the whole review rather than each ask, so a retry consumes the
     // remainder. Creating the controller inside `#ask` gave a retried review two full budgets,
@@ -453,11 +460,19 @@ export class AgentSdkModelClient implements ModelClient {
   }
 }
 
-/** Two usages summed, so a retried review reports what both attempts cost (FR-073). */
+/**
+ * Two usages summed, so a retried review reports what both attempts cost (FR-073).
+ *
+ * All four fields, not the two that existed when the retry was written: `totalTokens` sums the
+ * cache counters too, and adding only input and output here would have lost the cached half of
+ * every retried review — the same double-entry mistake as folding, one function over.
+ */
 function add(a: ModelUsage, b: ModelUsage): ModelUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
   };
 }
 

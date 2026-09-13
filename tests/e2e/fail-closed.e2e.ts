@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ModelError } from "../../src/model/client.js";
+import { ModelError, ZERO_USAGE } from "../../src/model/client.js";
 
 import {
   bothApprove,
@@ -146,6 +146,7 @@ describe("failing closed", () => {
     // non-zero because a model call that failed partway still consumed tokens, and a ledger that
     // under-counted those would let the failure path spend for free (FR-031).
     const interrupted = new ModelError("the model call failed partway through", {
+      ...ZERO_USAGE,
       inputTokens: 500,
       outputTokens: 0,
     });

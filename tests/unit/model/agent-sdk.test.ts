@@ -9,7 +9,7 @@ import {
   scopedEnvironment,
   type AgentQuery,
 } from "../../../src/model/agent-sdk.js";
-import { ModelError, type ReviewRequest } from "../../../src/model/client.js";
+import { ModelError, totalTokens, type ReviewRequest } from "../../../src/model/client.js";
 
 const WELL_FORMED = JSON.stringify({
   findings: [
@@ -232,10 +232,17 @@ describe("the response is consumed through the schema, exactly as on the API tra
 
     const response = await client.review(request());
 
-    // The harness caches its own prefix and reports it separately; ignoring it would hide the
-    // majority of what the run actually processed (FR-031).
-    expect(response.usage.inputTokens).toBe(10 + 26_000 + 4_000);
-    expect(response.usage.outputTokens).toBe(20);
+    // Reported apart, not folded into `inputTokens`. Before `ModelUsage` carried the cache fields
+    // this transport summed them into input, which was right then and would double-count now that
+    // `totalTokens` adds all four -- the two changes were written on separate branches.
+    expect(response.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheWriteTokens: 26_000,
+      cacheReadTokens: 4_000,
+    });
+    // And the metered total still carries the cached majority, which is the point (FR-031).
+    expect(totalTokens(response.usage)).toBe(10 + 20 + 26_000 + 4_000);
   });
 
   it("raises ModelError carrying the spend when the harness fails part-way through", async () => {
@@ -258,7 +265,12 @@ describe("the response is consumed through the schema, exactly as on the API tra
     expect(error).toBeInstanceOf(ModelError);
     // The second half of the contract, and the half the previous test dropped: what a failed call
     // consumed is still spend, and a ledger that lost it would under-count (FR-031).
-    expect((error as ModelError).usage).toEqual({ inputTokens: 700, outputTokens: 40 });
+    expect((error as ModelError).usage).toEqual({
+      inputTokens: 700,
+      outputTokens: 40,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("names an unauthenticated harness rather than folding it into a generic failure", async () => {
@@ -467,7 +479,7 @@ describe("the response is consumed through the schema, exactly as on the API tra
 
 describe("a reply that misses the schema is asked again, once (spec 004)", () => {
   /** Answers with `first` on the opening ask and `second` afterwards, recording every prompt. */
-  function thenAnswers(first: string, second: string) {
+  function thenAnswers(first: string, second: string, usage?: Record<string, number>) {
     const prompts: string[] = [];
     const fn = (input: { prompt: unknown }) => {
       prompts.push(String(input.prompt));
@@ -479,7 +491,7 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
         yield {
           type: "result",
           subtype: "success",
-          usage: { input_tokens: 500, output_tokens: 25 },
+          usage: usage ?? { input_tokens: 500, output_tokens: 25 },
         };
       })();
     };
@@ -539,11 +551,52 @@ describe("a reply that misses the schema is asked again, once (spec 004)", () =>
     expect(harness.prompts[1]).not.toContain("not json");
   });
 
+  it("sums every field of usage across attempts, so a new one cannot be dropped silently", async () => {
+    // Twice now a change to `ModelUsage` and a change to this transport have been written on
+    // separate branches and disagreed about usage arithmetic — cached tokens folded into input,
+    // then a retry charged on two of four fields. Both were caught by the compiler at rebase time
+    // and by nothing else.
+    //
+    // Derived from the object rather than from a list of field names, so a field added to
+    // `ModelUsage` and forgotten in the sum fails here rather than passing an assertion that never
+    // mentioned it. Asserted through `review()`, so no module-private helper is exported for it.
+    //
+    // This pins the summation, not the routing: every reported value is distinct and the mapping is
+    // one-to-one, so a transposition inside `readUsage` would double just as correctly and pass
+    // here. "charges both attempts, since both were spent", below, is what holds each wire field to
+    // the `ModelUsage` field it belongs to. Neither test covers the other's ground.
+    const reported = {
+      input_tokens: 5,
+      output_tokens: 7,
+      cache_creation_input_tokens: 11,
+      cache_read_input_tokens: 13,
+    };
+
+    const once = await new AgentSdkModelClient({
+      agentQuery: thenAnswers(WELL_FORMED, WELL_FORMED, reported),
+    }).review(request());
+    const twice = await new AgentSdkModelClient({
+      agentQuery: thenAnswers("not json", WELL_FORMED, reported),
+    }).review(request());
+
+    const fields = Object.keys(once.usage) as (keyof typeof once.usage)[];
+    // The harness reported something under every field, or this would pass vacuously.
+    expect(fields.every((field) => once.usage[field] > 0)).toBe(true);
+    for (const field of fields) {
+      expect(twice.usage[field]).toBe(once.usage[field] * 2);
+    }
+  });
+
   it("charges both attempts, since both were spent", async () => {
     const harness = thenAnswers("not json", WELL_FORMED);
     const response = await new AgentSdkModelClient({ agentQuery: harness }).review(request());
 
-    expect(response.usage).toEqual({ inputTokens: 1_000, outputTokens: 50 });
+    expect(response.usage).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 50,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it("gives up after the second miss rather than asking forever", async () => {
