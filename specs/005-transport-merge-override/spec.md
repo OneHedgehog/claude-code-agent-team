@@ -100,11 +100,11 @@ whole of the verifiable trail.
 **What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
 the operator on #9. The last comment on the pull request is at `09:54:36Z`, fifty-one minutes before
 the merge, and it is an agent's round-7 reply; no comment follows the merge, and no human review was
-submitted. The approval was given out of band — in the terminal session driving the agent — and no
-artifact of it reached GitHub. **This record therefore contains no words of the approver's own**, and
-the paraphrase an earlier draft carried, describing what they "had been told before deciding", has
-been removed rather than kept: it was an agent's account of a human's reasoning, offered where the
-human's own testimony belongs.
+submitted. On the operator's account, the approval was given out of band — in the terminal session
+driving the agent — and no artifact of it reached GitHub. **This record therefore contains no words
+of the approver's own**, and the paraphrase an earlier draft carried, describing what they "had been
+told before deciding", has been removed rather than kept: it was an agent's account of a human's
+reasoning, offered where the human's own testimony belongs.
 
 Two structural reasons it cannot be reconstructed after the fact, both worth naming because they
 will recur:
@@ -128,8 +128,9 @@ routes to the same escalation floor.
 
 ## What it does not license
 
-- It does not license an agent to perform this override. Principle V reserves it for a human, and
-  the decision above was taken by one after the option was put to them.
+- It does not license an agent to perform this override. Principle V reserves it for a human; the
+  merge was made by the `OneHedgehog` account, and what that does and does not establish about
+  who decided is recorded in "Who approved it" above.
 - It is spent. A second merge without a green gate needs its own record and its own approval — and,
   on the standard set above, an approving comment written by the operator before the fact.
 - It does not close the structural cause. The reviewer's failures across #9's nine rounds were
