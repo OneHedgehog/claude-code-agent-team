@@ -50,7 +50,11 @@ The context had never gone green. The approving review was missing for the same 
 not for a structural one: GitHub does not permit an author to approve their own pull request, but
 the reviewer App is a separate identity and its approval *does* count — demonstrated on
 [#6](https://github.com/OneHedgehog/claude-code-agent-team/pull/6), where a review by
-`claude-agent-reviewer-app[bot]` alone moved the pull request to `APPROVED`. What blocked #9 was
+`claude-agent-reviewer-app[bot]` alone moved the pull request to `APPROVED`. #6 also appears below as
+one of the pull requests the reviewer's recurring faults later blocked; both are true and they do not
+compete. An approving review from one role is not a green gate, which needs *both* roles to produce
+verdicts and zero blocking findings on one revision — so #6 demonstrates that the identity is
+eligible to approve, not that its gate ever closed. What blocked #9 was
 that the reviewer never produced a verdict across nine rounds, so it never approved anything. An
 earlier draft of this record said a sole maintainer "cannot satisfy the second at all", which would
 have enshrined a recoverable failure as a permanent property of the repository.
@@ -173,11 +177,14 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 "an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
 reason for existing forbids. Records supersede; they are not revised.
 
-**Neither item carried forward here has a tracking artifact, and that is a gap.** Waiver 2 and the
-recurring reviewer faults — subscription session limits and unsatisfied response schemas — both
-outlive this merge, and neither cites an issue the way the FR-037 cap escalation cites
+**None of the three items carried forward here has a tracking artifact, and that is a gap.** Waiver 2;
+the recurring reviewer faults — subscription session limits and unsatisfied response schemas; and the
+condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2 runs off CI and
+so cannot be evidenced from any pull request in this repository. All three outlive this merge, and
+none cites an issue the way the FR-037 cap escalation cites
 [#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10). A never-rewritten record is an
-archive, not a work queue: nothing here surfaces either item at the moment it matters, which is the
-next override request. Opening those issues is not in this diff — it would be unrelated content under
+archive, not a work queue: nothing here surfaces them at the moment they matter. For the first two
+that moment is the next override request; for the third it is the next *merge*, which arrives sooner
+and more often. Opening those issues is not in this diff — it would be unrelated content under
 Principle X — so the gap is named rather than quietly carried, and filing them belongs to whoever
 next reaches this impasse.
