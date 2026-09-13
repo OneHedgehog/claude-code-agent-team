@@ -146,6 +146,17 @@ will recur:
   identity. Every comment on #9 was written by the agent under that account, including one that
   addresses `@OneHedgehog` in the second person. The timeline cannot distinguish the human from the
   agent, so no amount of reading it establishes who said what.
+
+  **This is a containment defect and not only an evidentiary one**, and it is the more consequential
+  reading. An authoring agent holding the owner's credential holds the permission to disable
+  `enforce_admins`, push to `main`, and merge without a green gate. Principle V requires such
+  prohibitions to be "enforced by the execution environment, not by the agent's own compliance" — "a
+  rule an agent could break by deciding to is not a control; it is a hope" — and the Technology
+  section requires that the authoring identity not hold the permissions of the reviewing identity. On
+  the facts this record itself supplies, neither holds today. So when this file says below that it
+  does not license an agent to perform the override, that reservation is normative and currently
+  unenforced: the distinction between "a human did it" and "the account did it" is not merely
+  unlogged here, it is unenforceable.
 - **There is no audit log.** `OneHedgehog` is a user account, not an organisation, and the audit-log
   API answers `404`. The `enforce_admins` toggle — off, merge, on — left no retrievable record. Its
   having happened is inferred from the merge succeeding against a gate that was never green.
@@ -193,14 +204,25 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 "an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
 reason for existing forbids. Records supersede; they are not revised.
 
-**None of the three items carried forward here has a tracking artifact, and that is a gap.** Waiver 2;
-the recurring reviewer faults — subscription session limits and unsatisfied response schemas; and the
-condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2 runs off CI and
-so cannot be evidenced from any pull request in this repository. All three outlive this merge, and
-none cites an issue the way the FR-037 cap escalation cites
-[#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10). A never-rewritten record is an
-archive, not a work queue: nothing here surfaces them at the moment they matter. For the first two
-that moment is the next override request; for the third it is the next *merge*, which arrives sooner
-and more often. Opening those issues is not in this diff — it would be unrelated content under
-Principle X — so the gap is named rather than quietly carried, and filing them belongs to whoever
-next reaches this impasse.
+**Four items are carried forward, and only one of them is tracked.** They are: waiver 2; the
+recurring reviewer faults — subscription session limits and unsatisfied response schemas; the
+condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2 runs off CI
+and so cannot be evidenced from any pull request in this repository; and the shared-credential
+containment defect named under "Who approved it", which is the most consequential of the four.
+
+The exception is the schema half of the second. [Spec 004](../004-schema-retry/spec.md) landed as
+[#11](https://github.com/OneHedgehog/claude-code-agent-team/pull/11) while this record was in flight
+and asks once more when a reply misses the schema, so that fault is tracked and partly remediated
+rather than merely open — this record's own review rounds show the retry firing and the round then
+concluding. It is not closed: a retry lowers the rate at which a role produces no verdict, and does
+not make the response contract constrained the way the `api` transport does. The other three, and
+the session-limit half of the second, cite nothing the way the FR-037 cap escalation cites
+[#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10).
+
+A never-rewritten record is an archive, not a work queue: nothing here surfaces them at the moment
+they matter. For waiver 2 and the session limits that moment is the next override request; for the
+off-CI e2e half it is the next *merge*, which arrives sooner and more often; for the shared
+credential it is any moment an agent decides otherwise, which is the point of the principle it
+defeats. Opening those issues is not in this diff — it would be unrelated content under Principle X
+— so the gap is named rather than quietly carried, and filing them belongs to whoever next reaches
+this impasse.
