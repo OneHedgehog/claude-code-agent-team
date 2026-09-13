@@ -80,8 +80,8 @@ Deliberately *not* done, and named so that no future reader mistakes their absen
 - `required_status_checks.contexts` was not emptied.
 - The transport was not merged to a branch with the gate removed.
 
-**Feature gate 4 (Principle X, size) was satisfied, not crossed** — the second unsatisfied gate a
-reader reconciling this merge would otherwise be left to account for alone. #9 ran to roughly 2,000
+**Feature gate 4 (Principle X, size) was satisfied, not crossed** — the second gate a reader
+reconciling this merge would otherwise be left to account for alone. #9 ran to roughly 2,000
 non-lockfile lines against a `maxPullRequestSize` of 400, and its description carried the stated
 irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
 re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
@@ -90,7 +90,7 @@ principle provides, and the override reduces to **gate 5 alone** — the never-g
 the approving review that context would have carried.
 
 **Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
-head `e758e13` at `2026-09-06T10:11:41Z`, fifty-four minutes before the merge; that command covers
+head `e758e13` at `2026-09-06T10:11:41Z`, fifty-three minutes before the merge; that command covers
 build, lint, format, types and the unit and integration suites. The feature's e2e test runs on the
 developer machine rather than in CI (see `.github/workflows/ci.yml`), so that portion of gate 2 left no
 artifact on the pull request and is not claimed here. An earlier revision of this record said "gates 2
@@ -100,7 +100,7 @@ nothing anywhere in these events is a test failure.
 
 Note that `maxReviewableDiffSize` (FR-037, the service's refusal-to-review threshold) and
 `maxPullRequestSize` (Principle X, the merge gate) are distinct settings with distinct defaults. The
-two bullets above speak only to the former.
+first bullet above, and the "not `maxReviewableDiffSize`" clause before it, speak only to the former.
 
 ## Who approved it
 
@@ -111,8 +111,8 @@ the workflow's squash-only rule and Principle I's single-revertible-commit rule 
 things departed from. That is the whole of the verifiable trail.
 
 **What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
-the operator on #9. The last comment on the pull request is at `09:54:36Z`, fifty-one minutes before
-the merge, and it is an agent's round-7 reply; no comment follows the merge, and no human review was
+the operator on #9. The last comment on the pull request is at `09:54:36Z`, seventy minutes before the
+merge, and it is an agent's round-7 reply; no comment follows the merge, and no human review was
 submitted. On the operator's account, the approval was given out of band — in the terminal session
 driving the agent — and no artifact of it reached GitHub. **This record therefore contains no words
 of the approver's own**, and the paraphrase an earlier draft carried, describing what they "had been
