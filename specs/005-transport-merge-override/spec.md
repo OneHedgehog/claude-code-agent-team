@@ -68,10 +68,12 @@ contradicts the count three paragraphs above and would have credited the transpo
 nothing.
 
 The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled — stated on
-the operator's account and, for the first two steps, by inference from the merge having succeeded
-against a gate that was never green. The absence of an audit log (see "Who approved it") is why
-those two are inference rather than record, and this sentence is hedged where that section is
-candid; an unhedged version of it is the sentence a later reader would have quoted.
+the operator's account. Only the first of those three is inference, and it is inferred from the
+merge having succeeded against a gate that was never green. The second is not inference at all: the
+merge is recorded directly, at `2026-09-06T11:05:06Z`, under "Who approved it" below. The third is
+treated in the next paragraph. The absence of an audit log (see "Who approved it") is why the
+disable is inference rather than record, and this sentence is hedged where that section is candid;
+an unhedged version of it is the sentence a later reader would have quoted.
 
 **The present state is not inference.**
 `GET /repos/OneHedgehog/claude-code-agent-team/branches/main/protection` answers
@@ -103,14 +105,16 @@ principle provides.
 **The remaining gates, so that "gate 5" is an accounting rather than an assertion.** Gate 1 (lint,
 format, types) is covered by the `check` run below, and gate 2 by the same run so far as a pull
 request can evidence it — the qualification the next paragraph makes, not a fuller claim than it.
-Gate 3 (the feature's document under `docs/`, present in the same pull request) was met: #9 modified
-`docs/independent-review-service.md` in its own diff. Gate 6 was met: #9's description carried both
-its spec link and an authoring run identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is
-the one this record cannot settle** — it is human approval, and "Who approved it" below states
-plainly that no artifact of it reached GitHub. So what was *overridden* is gate 5, the never-green
-review context and the approving review it would have carried; gate 7 was not overridden so much as
-left unevidenced, and saying "gate 5 alone" without that distinction would assert the very thing the
-strongest section of this file declines to assert.
+Gate 3 (the feature's document under `docs/`, present in the same pull request **and matching the
+diff**) is evidenced on its first half only: #9 modified `docs/independent-review-service.md` in its
+own diff. Whether that document matched the change is not something this record checked, so it is
+not claimed. Gate 6 was met: #9's description carried both its spec link and an authoring run
+identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is the one this record cannot settle**
+— it is human approval, and "Who approved it" below states plainly that no artifact of it reached
+GitHub. So what was *overridden* is gate 5, the never-green review context and the approving review
+it would have carried; gate 7 was not overridden so much as left unevidenced, and saying "gate 5
+alone" without that distinction would assert the very thing the strongest section of this file
+declines to assert.
 
 **Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
 head `e758e13` at `2026-09-06T10:11:41Z`, fifty-three minutes before the merge; that command covers
@@ -207,11 +211,12 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 "an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
 reason for existing forbids. Records supersede; they are not revised.
 
-**Four items are carried forward, and only one of them is tracked.** They are: waiver 2; the
-recurring reviewer faults — subscription session limits and unsatisfied response schemas; the
-condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2 runs off CI
-and so cannot be evidenced from any pull request in this repository; and the shared-credential
-containment defect named under "Who approved it", which is the most consequential of the four.
+**Four items are carried forward, and none of them is fully tracked — one has a half that is.** They
+are: waiver 2; the recurring reviewer faults — subscription session limits and unsatisfied response
+schemas; the condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2
+runs off CI and so cannot be evidenced from any pull request in this repository; and the
+shared-credential containment defect named under "Who approved it", which is the most consequential
+of the four.
 
 The exception is the schema half of the second. [Spec 004](../004-schema-retry/spec.md) landed as
 [#11](https://github.com/OneHedgehog/claude-code-agent-team/pull/11) while this record was in flight
