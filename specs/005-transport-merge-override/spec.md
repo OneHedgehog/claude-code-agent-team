@@ -61,11 +61,13 @@ against a gate that was never green. The absence of an audit log (see "Who appro
 those two are inference rather than record, and this sentence is hedged where that section is
 candid; an unhedged version of it is the sentence a later reader would have quoted.
 
-**The third step is not inference.** `GET /repos/OneHedgehog/claude-code-agent-team/branches/main/protection`
-answers `enforce_admins.enabled: true`, read 2026-09-10, with `required_status_checks.contexts` still
-`["independent-review"]` and one required approving review. The protection is demonstrably back, and
-that is the claim which bounds this override's blast radius, so it is the one worth evidencing rather
-than asserting.
+**The present state is not inference.**
+`GET /repos/OneHedgehog/claude-code-agent-team/branches/main/protection` answers
+`enforce_admins.enabled: true`, read 2026-09-10, with `required_status_checks.contexts` still
+`["independent-review"]` and one required approving review. What that establishes outright is that the
+protection is *enforced on `main` today*; that it was switched off and put *back* is an event claim,
+and inherits the inference above rather than escaping it. The enforced state is the claim which bounds
+this override's blast radius, so it is the one worth evidencing rather than asserting.
 
 **The gate's configuration was not changed** — not the required context, not the approving-review
 count, not `maxReviewableDiffSize`. It is recorded as an administrator bypass rather than as a
@@ -84,7 +86,17 @@ non-lockfile lines against a `maxPullRequestSize` of 400, and its description ca
 irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
 re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
 test and specification each traceable to a specific finding. So gate 4 was met through the escape the
-principle provides, and only gates 2 and 5 — the never-green review context — were overridden.
+principle provides, and the override reduces to **gate 5 alone** — the never-green review context and
+the approving review that context would have carried.
+
+**Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
+head `e758e13` at `2026-09-06T10:11:41Z`, fifty-four minutes before the merge; that command covers
+build, lint, format, types and the unit and integration suites. The feature's e2e test runs on the
+developer machine rather than in CI (see `.github/workflows/ci.yml`), so that portion of gate 2 left no
+artifact on the pull request and is not claimed here. An earlier revision of this record said "gates 2
+and 5", adopting a prior reviewer's "2/5" shorthand as though it were an enumeration. It is not: the
+`independent-review` context is the reporting surface of gate 5 and cannot make gate 2 fail, and
+nothing anywhere in these events is a test failure.
 
 Note that `maxReviewableDiffSize` (FR-037, the service's refusal-to-review threshold) and
 `maxPullRequestSize` (Principle X, the merge gate) are distinct settings with distinct defaults. The
@@ -93,9 +105,10 @@ two bullets above speak only to the former.
 ## Who approved it
 
 **What the record can show.** [#9](https://github.com/OneHedgehog/claude-code-agent-team/pull/9) was
-merged at `2026-09-06T11:05:06Z` by the `OneHedgehog` account, as merge commit
-[`7e22757`](https://github.com/OneHedgehog/claude-code-agent-team/commit/7e22757e62). That is the
-whole of the verifiable trail.
+merged at `2026-09-06T11:05:06Z` by the `OneHedgehog` account, as squash commit
+[`7e22757`](https://github.com/OneHedgehog/claude-code-agent-team/commit/7e22757e62) — one parent, so
+the workflow's squash-only rule and Principle I's single-revertible-commit rule were not among the
+things departed from. That is the whole of the verifiable trail.
 
 **What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
 the operator on #9. The last comment on the pull request is at `09:54:36Z`, fifty-one minutes before
@@ -159,3 +172,12 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 `specs/003-subscription-backed-transport/spec.md` in place. An earlier draft of this line said
 "an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
 reason for existing forbids. Records supersede; they are not revised.
+
+**Neither item carried forward here has a tracking artifact, and that is a gap.** Waiver 2 and the
+recurring reviewer faults — subscription session limits and unsatisfied response schemas — both
+outlive this merge, and neither cites an issue the way the FR-037 cap escalation cites
+[#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10). A never-rewritten record is an
+archive, not a work queue: nothing here surfaces either item at the moment it matters, which is the
+next override request. Opening those issues is not in this diff — it would be unrelated content under
+Principle X — so the gap is named rather than quietly carried, and filing them belongs to whoever
+next reaches this impasse.
