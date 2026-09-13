@@ -50,14 +50,20 @@ The context had never gone green. The approving review was missing for the same 
 not for a structural one: GitHub does not permit an author to approve their own pull request, but
 the reviewer App is a separate identity and its approval *does* count — demonstrated on
 [#6](https://github.com/OneHedgehog/claude-code-agent-team/pull/6), where a review by
-`claude-agent-reviewer-app[bot]` alone moved the pull request to `APPROVED`. #6 also appears below as
-one of the pull requests the reviewer's recurring faults later blocked; both are true and they do not
-compete. An approving review from one role is not a green gate, which needs *both* roles to produce
-verdicts and zero blocking findings on one revision — so #6 demonstrates that the identity is
-eligible to approve, not that its gate ever closed. What blocked #9 was
-that the reviewer never produced a verdict across nine rounds, so it never approved anything. An
-earlier draft of this record said a sole maintainer "cannot satisfy the second at all", which would
-have enshrined a recoverable failure as a permanent property of the repository.
+`claude-agent-reviewer-app[bot]` alone moved the pull request to `APPROVED`. #6 also appears below
+as one of the pull requests the reviewer's recurring faults later blocked; both are true and they do
+not compete. An approving review from one role is not a green gate, which needs *both* roles to
+produce verdicts and zero blocking findings on one revision — so #6 demonstrates that the identity
+is eligible to approve, not that its gate ever closed. What blocked #9 was that the conjunction
+never occurred, as stated in "What happened" above: a role produced no verdict at all on four of the
+nine rounds, and on the rest the two verdicts and zero blocking findings never coincided on one
+revision. The reviewer was not silent across all nine — it raised the findings that were argued and
+answered — so the App never reached an approving review, rather than never speaking. Two earlier
+drafts of this record got this wrong in opposite directions: one said a sole maintainer "cannot
+satisfy the second at all", enshrining a recoverable failure as a permanent property of the
+repository; the other said the reviewer "never produced a verdict across nine rounds", which
+contradicts the count four paragraphs above and would have credited the transport with producing
+nothing.
 
 The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled — stated on
 the operator's account and, for the first two steps, by inference from the merge having succeeded
@@ -90,8 +96,18 @@ non-lockfile lines against a `maxPullRequestSize` of 400, and its description ca
 irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
 re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
 test and specification each traceable to a specific finding. So gate 4 was met through the escape the
-principle provides, and the override reduces to **gate 5 alone** — the never-green review context and
-the approving review that context would have carried.
+principle provides.
+
+**The remaining gates, so that "gate 5" is an accounting rather than an assertion.** Gate 1 (lint,
+format, types) and gate 2 are covered by the `check` run below. Gate 3 (the feature's document under
+`docs/`, present in the same pull request) was met: #9 modified `docs/independent-review-service.md`
+in its own diff. Gate 6 was met: #9's description carried both its spec link and an authoring run
+identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is the one this record cannot settle**
+— it is human approval, and "Who approved it" below states plainly that no artifact of it reached
+GitHub. So what was *overridden* is gate 5, the never-green review context and the approving review
+it would have carried; gate 7 was not overridden so much as left unevidenced, and saying "gate 5
+alone" without that distinction would assert the very thing the strongest section of this file
+declines to assert.
 
 **Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
 head `e758e13` at `2026-09-06T10:11:41Z`, fifty-three minutes before the merge; that command covers
