@@ -22,9 +22,15 @@ puts that record under `specs/`, which is never rewritten, rather than in `docs/
 [#9](https://github.com/OneHedgehog/claude-code-agent-team/pull/9) was reviewed **nine times** by
 the service, through the transport it adds, on a host with no API credential. Every blocking finding
 raised across those rounds was fixed or declined with a stated justification, and the replies are on
-the pull request. Nine sat inside the configured bound: `maxReviewRounds` was — and still is — ten,
-so the round cap was not exhausted and feature gate 5's exhausted-rounds escalation was never
-triggered. What follows is therefore not a story about running out of rounds.
+the pull request. **A declined finding is not a closed one.** Principle VI lets an author answer a
+blocking comment by replying rather than changing the code, but only the reviewer's subsequent
+approval closes it — and no such approval ever came, because the reviewer never reached one. So
+every finding declined rather than fixed stood, at merge, as a waiver in feature gate 5's sense,
+requiring a recorded human-approved reason. Waiver 2 of spec 003, carried forward below, is the one
+that is labelled as such; it is not the only finding with that standing. Nine sat inside the
+configured bound: `maxReviewRounds` was — and still is — ten, so the round cap was not exhausted and
+feature gate 5's exhausted-rounds escalation was never triggered. What follows is therefore not a
+story about running out of rounds.
 
 The gate never reported green, for two reasons that are properties of the situation rather than of
 the change:
@@ -94,13 +100,19 @@ Deliberately *not* done, and named so that no future reader mistakes their absen
 - `required_status_checks.contexts` was not emptied.
 - The transport was not merged to a branch with the gate removed.
 
-**Feature gate 4 (Principle X, size) was satisfied, not crossed** — the second gate a reader
-reconciling this merge would otherwise be left to account for alone. #9 ran to roughly 2,000
+**Feature gate 4's size clause was satisfied, not crossed** — the second gate a reader reconciling
+this merge would otherwise be left to account for alone. The gate has three clauses: every changed
+line traces to the feature's spec, no unrelated change rides along, and the diff is within
+`maxPullRequestSize` or carries a stated justification for why it cannot be split. Only the third is
+evidenced here. The record supplies its own reason for not claiming the first two: nine rounds of
+review-mandated tests, specification and disclosure grew #9 from roughly 800 lines to 2,000, and
+content added to satisfy a *finding* traces to that finding, which is not the same relation as
+tracing to the spec. Which it was is not established, so it is not asserted. #9 ran to roughly 2,000
 non-lockfile lines against a `maxPullRequestSize` of 400, and its description carried the stated
 irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
 re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
-test and specification each traceable to a specific finding. So gate 4 was met through the escape the
-principle provides.
+test and specification each traceable to a specific finding. So gate 4 was met through the escape
+the principle provides.
 
 **The remaining gates, so that "gate 5" is an accounting rather than an assertion.** Gate 1 (lint,
 format, types) is covered by the `check` run below, and gate 2 by the same run so far as a pull
