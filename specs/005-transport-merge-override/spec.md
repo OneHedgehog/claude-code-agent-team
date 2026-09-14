@@ -74,12 +74,12 @@ contradicts the count three paragraphs above and would have credited the transpo
 nothing.
 
 The override was therefore `enforce_admins`: disabled, the merge performed, re-enabled — stated on
-the operator's account. Only the first of those three is inference, and it is inferred from the
-merge having succeeded against a gate that was never green. The second is not inference at all: the
-merge is recorded directly, at `2026-09-06T11:05:06Z`, under "Who approved it" below. The third is
-treated in the next paragraph. The absence of an audit log (see "Who approved it") is why the
-disable is inference rather than record, and this sentence is hedged where that section is candid;
-an unhedged version of it is the sentence a later reader would have quoted.
+the operator's account. The first of those three is inference of its own, inferred from the merge
+having succeeded against a gate that was never green. The second is not inference at all: the merge
+is recorded directly, at `2026-09-06T11:05:06Z`, under "Who approved it" below. The third is treated
+in the next paragraph. The absence of an audit log (see "Who approved it") is why the disable is
+inference rather than record, and this sentence is hedged where that section is candid; an unhedged
+version of it is the sentence a later reader would have quoted.
 
 **The present state is not inference.**
 `GET /repos/OneHedgehog/claude-code-agent-team/branches/main/protection` answers
@@ -111,8 +111,8 @@ tracing to the spec. Which it was is not established, so it is not asserted. #9 
 non-lockfile lines against a `maxPullRequestSize` of 400, and its description carried the stated
 irreducibility justification Principle X permits: an order-of-magnitude figure, the command that
 re-derives it at any revision, and a "Why it cannot be smaller" section arguing that two-thirds is
-test and specification each traceable to a specific finding. So gate 4 was met through the escape
-the principle provides.
+test and specification each traceable to a specific finding. So gate 4's size clause was met through
+the escape the principle provides.
 
 **The remaining gates, so that "gate 5" is an accounting rather than an assertion.** Gate 1 (lint,
 format, types) is covered by the `check` run below, and gate 2 by the same run so far as a pull
@@ -150,13 +150,15 @@ the workflow's squash-only rule and Principle I's single-revertible-commit rule 
 things departed from. That is the whole of the verifiable trail.
 
 **What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
-the operator on #9. The last comment on the pull request is at `09:54:36Z`, seventy minutes before the
-merge, and it is an agent's round-7 reply; no comment follows the merge, and no human review was
-submitted. On the operator's account, the approval was given out of band — in the terminal session
-driving the agent — and no artifact of it reached GitHub. **This record therefore contains no words
-of the approver's own**, and the paraphrase an earlier draft carried, describing what they "had been
-told before deciding", has been removed rather than kept: it was an agent's account of a human's
-reasoning, offered where the human's own testimony belongs.
+the operator on #9. The last comment on the pull request is at `09:54:36Z`, seventy minutes before
+the merge, and it is an agent's round-7 reply — two rounds short of the nine, because a round whose
+reviewer produced no verdict raises nothing to reply to, and the record counts four such rounds
+without establishing that rounds 8 and 9 were among them; no comment follows the merge, and no human
+review was submitted. On the operator's account, the approval was given out of band — in the
+terminal session driving the agent — and no artifact of it reached GitHub. **This record therefore
+contains no words of the approver's own**, and the paraphrase an earlier draft carried, describing
+what they "had been told before deciding", has been removed rather than kept: it was an agent's
+account of a human's reasoning, offered where the human's own testimony belongs.
 
 Two structural reasons it cannot be reconstructed after the fact, both worth naming because they
 will recur:
