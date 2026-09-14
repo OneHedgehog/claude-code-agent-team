@@ -27,10 +27,13 @@ blocking comment by replying rather than changing the code, but only the reviewe
 approval closes it — and no such approval ever came, because the reviewer never reached one. So
 every finding declined rather than fixed stood, at merge, as a waiver in feature gate 5's sense,
 requiring a recorded human-approved reason. Waiver 2 of spec 003, carried forward below, is the one
-that is labelled as such; it is not the only finding with that standing. Nine sat inside the
-configured bound: `maxReviewRounds` was — and still is — ten, so the round cap was not exhausted and
-feature gate 5's exhausted-rounds escalation was never triggered. What follows is therefore not a
-story about running out of rounds.
+that is labelled as such; it is not the only finding with that standing. The outer bound is
+checkable: #9 carries 54 distinct findings, of which **24 were blocking** — one `critical`, ten
+`high`, twelve `medium`, one `low`. How many of those 24 were fixed rather than declined is not
+established here, and the declined remainder is the set of unrecorded waivers this merge made
+permanent. Nine sat inside the configured bound: `maxReviewRounds` was — and still is — ten, so the
+round cap was not exhausted and feature gate 5's exhausted-rounds escalation was never triggered.
+What follows is therefore not a story about running out of rounds.
 
 The gate never reported green, for two reasons that are properties of the situation rather than of
 the change:
@@ -124,9 +127,10 @@ not claimed. Gate 6 was met: #9's description carried both its spec link and an 
 identifier, `6cf65d0c-bf53-4b92-8190-eec4e66d89f3`. **Gate 7 is the one this record cannot settle**
 — it is human approval, and "Who approved it" below states plainly that no artifact of it reached
 GitHub. So what was *overridden* is gate 5, the never-green review context and the approving review
-it would have carried; gate 7 was not overridden so much as left unevidenced, and saying "gate 5
-alone" without that distinction would assert the very thing the strongest section of this file
-declines to assert.
+it would have carried. Two others are not overridden but unestablished, and the distinction matters:
+gate 7 was left unevidenced, and gate 4's two minimality clauses were never shown either, as the
+paragraph above says outright. Saying "gate 5 alone" without carrying both qualifications would
+assert the very things the two most careful passages of this file decline to assert.
 
 **Gate 2 was satisfied so far as a pull request can show it.** CI reported `check` as `success` on #9's
 head `e758e13` at `2026-09-06T10:11:41Z`, fifty-three minutes before the merge; that command covers
@@ -151,14 +155,15 @@ things departed from. That is the whole of the verifiable trail.
 
 **What it cannot show, stated plainly rather than paraphrased.** There is no approving comment from
 the operator on #9. The last comment on the pull request is at `09:54:36Z`, seventy minutes before
-the merge, and it is an agent's round-7 reply — two rounds short of the nine, because a round whose
-reviewer produced no verdict raises nothing to reply to, and the record counts four such rounds
-without establishing that rounds 8 and 9 were among them; no comment follows the merge, and no human
-review was submitted. On the operator's account, the approval was given out of band — in the
-terminal session driving the agent — and no artifact of it reached GitHub. **This record therefore
-contains no words of the approver's own**, and the paraphrase an earlier draft carried, describing
-what they "had been told before deciding", has been removed rather than kept: it was an agent's
-account of a human's reasoning, offered where the human's own testimony belongs.
+the merge, and it is an agent's round-7 reply. Rounds 8 and 9 left no reply on the pull request, and
+this record does not establish what they produced: a round whose reviewer returns no verdict raises
+nothing to answer, and four of the nine were such rounds, but whether 8 and 9 were among them is not
+shown here. No comment follows the merge, and no human review was submitted. On the operator's
+account, the approval was given out of band — in the terminal session driving the agent — and no
+artifact of it reached GitHub. **This record therefore contains no words of the approver's own**,
+and the paraphrase an earlier draft carried, describing what they "had been told before deciding",
+has been removed rather than kept: it was an agent's account of a human's reasoning, offered where
+the human's own testimony belongs.
 
 Two structural reasons it cannot be reconstructed after the fact, both worth naming because they
 will recur:
@@ -225,12 +230,19 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 "an amendment to spec 003", which pointed the next actor at exactly the rewrite this document's own
 reason for existing forbids. Records supersede; they are not revised.
 
-**Four items are carried forward, and none of them is fully tracked — one has a half that is.** They
-are: waiver 2; the recurring reviewer faults — subscription session limits and unsatisfied response
-schemas; the condition disclosed in the gate-2 paragraph above, that the e2e half of feature gate 2
-runs off CI and so cannot be evidenced from any pull request in this repository; and the
-shared-credential containment defect named under "Who approved it", which is the most consequential
-of the four.
+**Five items are carried forward, and none of them is fully tracked — one has a half that is.** They
+are: waiver 2; **the unlabelled waivers** — every one of #9's 24 blocking findings that was declined
+rather than fixed, which "What happened" establishes had the standing of a Principle VI waiver at
+merge and none of which carries a recorded human-approved reason; the recurring reviewer faults —
+subscription session limits and unsatisfied response schemas; the condition disclosed in the gate-2
+paragraph above, that the e2e half of feature gate 2 runs off CI and so cannot be evidenced from any
+pull request in this repository; and the shared-credential containment defect named under "Who
+approved it", which is the most consequential of the five.
+
+The second is the one this file is least able to discharge. A reader can find waiver 2 by name and
+cannot find the others at all: they are recoverable only by re-reading nine rounds of comments on a
+pull request this record elsewhere says cannot be attributed to a speaker. Naming the set and its
+outer bound is the most this document can do; enumerating it is work for whoever next needs it.
 
 The exception is the schema half of the second. [Spec 004](../004-schema-retry/spec.md) landed as
 [#11](https://github.com/OneHedgehog/claude-code-agent-team/pull/11) while this record was in flight
