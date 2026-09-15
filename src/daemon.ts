@@ -425,6 +425,9 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
    */
   const queuedSince = new Map<string, string>();
 
+  /** The previous tick's skip list, so an unchanged one is not written again. */
+  let lastSkipped: string | null = null;
+
   while (running()) {
     const adapters = await compose();
     const { settings } = adapters.settings;
@@ -451,6 +454,32 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
           findingId: thread.findingId,
           latestReplyAt: thread.latestReplyAt,
         }));
+      },
+    });
+
+    // The heartbeat (Principle VII). Why it exists, why the list is suppressed when unchanged, and
+    // why a `304` is treated differently are all in docs/independent-review-service.md; repeating
+    // the argument here would give it a second home to drift from.
+    //
+    // Sorted once, so the same order is both compared and written: deciding on a sorted copy while
+    // recording the listing's order would let two records of an identical set disagree.
+    const skipped = tick.considered
+      .filter((selection) => !selection.select)
+      .map((selection) => ({ pullRequest: selection.pullRequest, reason: selection.reason }))
+      .sort((left, right) => left.pullRequest - right.pullRequest);
+    const signature = JSON.stringify(skipped);
+
+    // A `304` examined no listing, so it records no skip list and leaves
+    // the remembered set exactly as it was.
+    const skippedChanged = !tick.unchanged && signature !== lastSkipped;
+    if (!tick.unchanged) lastSkipped = signature;
+
+    adapters.logger.info("tick.completed", {
+      tick: {
+        unchanged: tick.unchanged,
+        considered: tick.considered.length,
+        selected: tick.selected.length,
+        ...(skippedChanged ? { skipped } : {}),
       },
     });
 
