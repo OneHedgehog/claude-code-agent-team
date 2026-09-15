@@ -231,32 +231,39 @@ It can still be closed, and the mechanism matters: **by a new spec that cites 00
 reason for existing forbids. Records supersede; they are not revised.
 
 **Five items are carried forward, and none of them is fully tracked — one has a half that is.** They
-are: waiver 2; **the unlabelled waivers** — every one of #9's 24 blocking findings that was declined
-rather than fixed, which "What happened" establishes had the standing of a Principle VI waiver at
-merge and none of which carries a recorded human-approved reason; the recurring reviewer faults —
-subscription session limits and unsatisfied response schemas; the condition disclosed in the gate-2
-paragraph above, that the e2e half of feature gate 2 runs off CI and so cannot be evidenced from any
-pull request in this repository; and the shared-credential containment defect named under "Who
-approved it", which is the most consequential of the five.
+are, named rather than numbered, because an ordinal in a frozen record points at whatever the list
+later becomes:
 
-The second is the one this file is least able to discharge. A reader can find waiver 2 by name and
-cannot find the others at all: they are recoverable only by re-reading nine rounds of comments on a
-pull request this record elsewhere says cannot be attributed to a speaker. Naming the set and its
+- **Waiver 2** of spec 003.
+- **The unlabelled waivers** — every one of #9's 24 blocking findings that was declined rather than
+  fixed, which "What happened" establishes had the standing of a Principle VI waiver at merge, and
+  none of which carries a recorded human-approved reason.
+- **The recurring reviewer faults** — subscription session limits, and responses that miss the review
+  schema.
+- **The off-CI half of gate 2**, disclosed in the gate-2 paragraph above: the feature's e2e test runs
+  on the developer machine, so that half cannot be evidenced from any pull request in this repository.
+- **The shared-credential containment defect** named under "Who approved it", which is the most
+  consequential of the five.
+
+The unlabelled waivers are the item this file is least able to discharge. A reader can find waiver 2
+by name and cannot find that set at all: it is recoverable only by re-reading nine rounds of comments
+on a pull request this record elsewhere says cannot be attributed to a speaker. Naming the set and its
 outer bound is the most this document can do; enumerating it is work for whoever next needs it.
 
-The exception is the schema half of the second. [Spec 004](../004-schema-retry/spec.md) landed as
+The one partial exception is the schema half of the recurring reviewer faults. [Spec
+004](../004-schema-retry/spec.md) landed as
 [#11](https://github.com/OneHedgehog/claude-code-agent-team/pull/11) while this record was in flight
 and asks once more when a reply misses the schema, so that fault is tracked and partly remediated
 rather than merely open — this record's own review rounds show the retry firing and the round then
 concluding. It is not closed: a retry lowers the rate at which a role produces no verdict, and does
-not make the response contract constrained the way the `api` transport does. The other three, and
-the session-limit half of the second, cite nothing the way the FR-037 cap escalation cites
-[#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10).
+not make the response contract constrained the way the `api` transport does. Everything else on the
+list, including the session-limit half of the same item, cites nothing the way the FR-037 cap
+escalation cites [#10](https://github.com/OneHedgehog/claude-code-agent-team/issues/10).
 
 A never-rewritten record is an archive, not a work queue: nothing here surfaces them at the moment
-they matter. For waiver 2 and the session limits that moment is the next override request; for the
-off-CI e2e half it is the next *merge*, which arrives sooner and more often; for the shared
-credential it is any moment an agent decides otherwise, which is the point of the principle it
-defeats. Opening those issues is not in this diff — it would be unrelated content under Principle X
-— so the gap is named rather than quietly carried, and filing them belongs to whoever next reaches
-this impasse.
+they matter. For waiver 2, the unlabelled waivers and the session limits that moment is the next
+override request; for the off-CI e2e half it is the next *merge*, which arrives sooner and more
+often; for the shared credential it is any moment an agent decides otherwise, which is the point of
+the principle it defeats. Opening those issues is not in this diff — it would be unrelated content
+under Principle X — so the gap is named rather than quietly carried, and filing them belongs to
+whoever next reaches this impasse.
