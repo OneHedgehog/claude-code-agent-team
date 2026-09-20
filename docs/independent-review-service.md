@@ -234,6 +234,21 @@ When every provider in a route has returned a capacity failure the gate **fails 
 each provider tried and its class. No limit is raised, no required role is dropped, and no provider
 absent from the route is invented.
 
+### The per-attempt bound is five minutes
+
+Each attempt is bounded separately at 300 seconds, and an expiry is a capacity failure — so on a
+route with a second provider it becomes a failover rather than a failed review. This supersedes the
+earlier fifteen-minute bound.
+
+Per-attempt is only safe because of the arithmetic: at five minutes a six-provider route still fits
+inside the thirty minutes `maxQueueWaitSeconds` promises whatever is queued behind it. Preflight
+checks that arithmetic rather than assuming it, and refuses a route long enough to break it.
+
+**What the shorter bound costs, because it is real.** A review that would have finished at eight
+minutes now expires. With a second provider that costs latency; on a route of one it is a missing
+verdict and a failed gate. The tightening therefore bites hardest on a single-provider
+configuration — which is what excluding the authoring provider currently produces here.
+
 ### What preflight refuses, before any spend
 
 An empty route, or a required role with no route. A route naming an undeclared provider, or the
