@@ -249,6 +249,40 @@ minutes now expires. With a second provider that costs latency; on a route of on
 verdict and a failed gate. The tightening therefore bites hardest on a single-provider
 configuration — which is what excluding the authoring provider currently produces here.
 
+### Independence is checked on families, not vendor labels — and is currently dormant
+
+No required reviewer role may run on the authoring identity's model family, and the check compares
+**families** rather than vendor labels. That distinction is not pedantry: an aggregator can serve
+one vendor's family under another vendor's name, so a check comparing vendor strings would pass
+while the reviewer ran on precisely the model that wrote the diff. It is also why a provider must
+pin its models explicitly — a vendor default is a family nobody checked.
+
+**On this repository the rule does not currently run.** It needs a subject, and `authoringProvider`
+is not declared, because every provider this service reaches is the same family that authors the
+code. Declaring it would refuse every configuration there is. That is not a loophole in the check;
+it is an accurate reading of a system with one model family in it, and the rule is built and
+tested so that it binds the moment a second family exists.
+
+Where one is declared, an operator may override the rule with `authoringProviderOverrideReason`.
+Presence of a reason *is* the override; there is no boolean, because a reason is the point.
+
+### What preflight verifies per provider
+
+Every provider a route names must have its credential found before any spend, and a **last-resort
+entry is held to exactly the same standard as a first one**: a fallback nobody verified is not a
+fallback, and the moment it is reached is the moment nothing else is left to try. A provider no
+route reaches is not checked — it cannot serve a request, so its credential is not yet anybody's
+problem.
+
+An `oauth-profile` credential legitimately carries no key; only a source that promises a key and
+then supplies an empty one is a failure.
+
+Routes whose entries draw on **one** account are reported, not refused. Such a route is
+independent without being resilient: one session limit ends every entry in it, the route exhausts,
+and the gate closes exactly as it would have with a single provider. It is permitted because an
+operator may want it, and reported because the only real danger is believing it bought
+availability it did not.
+
 ### What preflight refuses, before any spend
 
 An empty route, or a required role with no route. A route naming an undeclared provider, or the
