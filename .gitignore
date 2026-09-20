@@ -31,6 +31,9 @@ Thumbs.db
 # only the per-developer local layer is ignored.
 .claude/settings.local.json
 
+# Gemini / Antigravity local agent workspace
+.gemini/
+
 # Logs
 *.log
 npm-debug.log*
