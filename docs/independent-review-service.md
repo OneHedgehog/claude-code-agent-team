@@ -149,7 +149,13 @@ GitHub enforces the part that matters: **only GitHub Apps can create check runs.
 token cannot report this gate whatever scopes it carries. That is a platform guarantee, not a
 convention this service maintains.
 
-## Reaching the model
+## Reaching the model: providers, routes and failover
+
+Each required reviewer role is asked along its own ordered list of providers — its **route** — and
+the list is advanced only when a provider fails for a reason that says nothing about the reviewed
+diff. A `RoutingModelClient` sits where the single model client used to, and is itself a
+`ModelClient`, so the roles, the gate, the daemon and the queue are unchanged and never learn that
+more than one provider might be asked.
 
 ### Provider, account, route
 
@@ -266,42 +272,6 @@ tested so that it binds the moment a second family exists.
 Where one is declared, an operator may override the rule with `authoringProviderOverrideReason`.
 Presence of a reason *is* the override; there is no boolean, because a reason is the point.
 
-### What preflight verifies per provider
-
-Every provider a route names must have its credential found before any spend, and a **last-resort
-entry is held to exactly the same standard as a first one**: a fallback nobody verified is not a
-fallback, and the moment it is reached is the moment nothing else is left to try. A provider no
-route reaches is not checked — it cannot serve a request, so its credential is not yet anybody's
-problem.
-
-An `oauth-profile` credential legitimately carries no key; only a source that promises a key and
-then supplies an empty one is a failure.
-
-Routes whose entries draw on **one** account are reported, not refused. Such a route is
-independent without being resilient: one session limit ends every entry in it, the route exhausts,
-and the gate closes exactly as it would have with a single provider. It is permitted because an
-operator may want it, and reported because the only real danger is believing it bought
-availability it did not.
-
-### Budgets sit on the account; spend is attributed to the provider
-
-An account is what gets billed or throttled, so it is what a budget can bound. A provider is what
-produced a verdict, so it is what a draw is attributed to. The two levels are deliberate and they
-do different jobs.
-
-Budgeting per *provider* instead would let two providers on one account carry two budgets whose
-sum exceeds what the account holds — each passing its own reserve check while the shared quota was
-already gone. That is the concealment this design exists to prevent, reintroduced one level up.
-
-`review` remains the only actor permitted to draw into a reserve, now checked against the reserve
-of the account being charged. `platformApiBudget` is untouched: GitHub requests come from one
-account and genuinely are one resource, which is the same principle reached from the other side.
-
-Every ledger entry carries both its provider and its account. Entries written before this change
-carry neither, and are attributed to the account and provider the migration synthesised — the only
-reading consistent with what the operator actually spent. Dropping them would under-count, which
-is the failure the ledger exists to prevent.
-
 ### What preflight refuses, before any spend
 
 An empty route, or a required role with no route. A route naming an undeclared provider, or the
@@ -323,6 +293,50 @@ The synthesised provider pins no model, and the declaration rules never inspect 
 file pinned nothing, and demanding one would break the promise that it keeps working. Such a file
 loads, resolves and reports exactly as before. Its **timing** changes, by the five-minute bound
 above; that is the one behavioural difference and it is deliberate.
+
+### Budgets sit on the account; spend is attributed to the provider
+
+An account is what gets billed or throttled, so it is what a budget can bound. A provider is what
+produced a verdict, so it is what a draw is attributed to. The two levels are deliberate and they
+do different jobs.
+
+Budgeting per *provider* instead would let two providers on one account carry two budgets whose
+sum exceeds what the account holds — each passing its own reserve check while the shared quota was
+already gone. That is the concealment this design exists to prevent, reintroduced one level up.
+
+`review` remains the only actor permitted to draw into a reserve, now checked against the reserve
+of the account being charged. `platformApiBudget` is untouched: GitHub requests come from one
+account and genuinely are one resource, which is the same principle reached from the other side.
+
+Every ledger entry carries both its provider and its account. Entries written before this change
+carry neither, and are attributed to the account and provider the migration synthesised — the only
+reading consistent with what the operator actually spent. Dropping them would under-count, which
+is the failure the ledger exists to prevent.
+
+### What preflight verifies per provider
+
+Every provider a route names must have its credential found before any spend, and a **last-resort
+entry is held to exactly the same standard as a first one**: a fallback nobody verified is not a
+fallback, and the moment it is reached is the moment nothing else is left to try. A provider no
+route reaches is not checked — it cannot serve a request, so its credential is not yet anybody's
+problem.
+
+An `oauth-profile` credential legitimately carries no key; only a source that promises a key and
+then supplies an empty one is a failure.
+
+Routes whose entries draw on **one** account are reported, not refused. Such a route is
+independent without being resilient: one session limit ends every entry in it, the route exhausts,
+and the gate closes exactly as it would have with a single provider. It is permitted because an
+operator may want it, and reported because the only real danger is believing it bought
+availability it did not.
+
+### What the run records
+
+`settings.resolved` carries each role's resolved route once per run, and whether it was migrated —
+after a migration that is the only place the synthesised route is visible at all. Every role event
+carries the `provider` that produced the verdict or failed trying, and a failure carries its
+`failureClass`; an exhausted route carries every attempt in order. A verdict whose author is
+unrecorded cannot be weighed later against that provider's track record.
 
 ## How to run it
 
