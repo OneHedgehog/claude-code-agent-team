@@ -87,7 +87,7 @@ than in anticipation of one.
 | Pull requests | Read and write | Read and write | Open pull requests, read diffs, post the author-side replies the waiver scenarios need |
 | Workflows | Read and write | Read and write | Required to commit anything under `.github/workflows/` |
 | Checks | **Read** | **Read** | The e2e harness must read the gate's conclusion to assert on it |
-| Issues | Read | Read and write | Verify escalation issues; the fixture also needs teardown |
+| Issues | Read *(see below)* | Read and write | Verify escalation issues; the fixture also needs teardown |
 | Administration | **none** | Read and write | Toggling branch protection is the *fixture* for the missing-protection scenario; on the target it would let the gate be removed |
 | Actions | none | Read | Optional. Was for inspecting workflow-run timing in the queue-wait scenarios; under R-017 the wait is measured from the enqueuing tick, and there is no workflow run to read |
 
@@ -96,6 +96,37 @@ than in anticipation of one.
 workflow files under human control, leave the permission off and commit `ci.yml` yourself. (There
 is only `ci.yml`: the reviewer workflow was deleted under R-017, and the service runs as a local
 process instead.)
+
+**Issues on the target: the table says Read, the token has Write.** Observed 2026-09-20, when
+`/speckit-taskstoissues` created issues #14–#43 on the target with thirty consecutive `201`s. The
+table above records what this set was *designed* to be; the live grant is wider. Two defensible
+resolutions, and the choice is the operator's:
+
+- **Keep it.** Turning a feature's `tasks.md` into tracked issues is ordinary authoring work, and
+  the authoring identity is the right one to do it. Issues are not the merge gate, so a wider grant
+  here does not let the PAT weaken anything Principle VI depends on.
+- **Narrow it to Read** and create issues by hand. Costs a manual step per feature and removes a
+  capability nothing else in the contract needs.
+
+**This is escalated, not parked** — through the configured channel rather than only here:
+[#56](https://github.com/OneHedgehog/claude-code-agent-team/issues/56), which also carries the
+rotation obligation below and the open question of whether direct API use is ever acceptable. A document under `docs/` records what is true now, and a known
+gap between the designed least-privilege set and the live grant is a Principle V defect rather than
+a note. It is raised for a human decision; until one is made the table above states the intent and
+this paragraph states the divergence, and neither is treated as settled.
+
+**What is now verified, and how.** The 2026-09-20 episode recorded below exercised several of
+these grants against the target and settled what had been unverified: `issues: write` (thirty
+issues created), `contents: write` (nine branches pushed) and `pull_requests: write` (nine pull
+requests opened). **`administration` is not held on the target at all** — the table above records
+it as `none` there, and `Read and write` on the fixture alone — which is correct and must stay
+that way: an identity that can change branch protection can remove its own gate. (The *reviewing*
+App installation separately holds `administration: read`, which is what lets it verify protection
+without being able to alter it.)
+
+This is recorded here so the inventory does not disagree with the incident record below. A
+permission list that still calls a grant unverified, next to an account of that grant being used,
+cannot support a least-privilege review.
 
 **Tuning**: grant this set, then narrow on evidence. When something returns `403`, the endpoint in
 the error names the missing permission exactly. Starting tight and widening on a specific failure
@@ -122,6 +153,45 @@ prints attributes only. Adding `-w` prints the secret; don't.
 
 To rotate: generate a new token, run `--set` again (it overwrites), restart. To revoke: delete it at
 [github.com/settings/tokens](https://github.com/settings/tokens).
+
+### Why there is no documented route around the launch script
+
+An earlier revision of this document described extracting the PAT from the keychain and passing it
+to `curl` as a primary route to the API, on the argument that a value captured by `$( )` is "used"
+rather than "disclosed". **That section has been removed and the prohibition above restored.**
+
+Two things were wrong with it. The narrow one: the argument was overstated, because
+`VAR=$(...) cmd` places the secret in the child process's environment, where the same user can
+observe it — "never reaches the transcript" is a weaker claim than "safe", and it was presented as
+the stronger one.
+
+The broader one matters more. Principle V says agents MUST NOT read or transmit credentials, and
+that containment is enforced by the execution environment rather than by an agent's compliance.
+The launch script *is* that environment: it injects the credential so the agent never holds it. A
+documented way for an agent to extract the credential itself defeats the control whatever care
+follows, and rewriting the prohibition to permit it is the precise move Governance forbids —
+relaxing a rule to unblock the work in front of you.
+
+The operational facts discovered at the time remain true and are kept where they belong: the MCP
+server reports `Authorization header is badly formatted` when the variable is empty (see
+[CLAUDE.md](../CLAUDE.md)), `curl` resolves `api.github.com` inside the Bash sandbox where Node's
+`fetch` needs `NODE_USE_ENV_PROXY=1`, and the repository `permissions` block describes the
+account's role rather than the token's grants.
+
+**The token must be treated as exposed, and rotated.** By the same reasoning that refutes the old
+"use, not disclosure" defence — `VAR=$(...) cmd` places the secret in the child process's
+environment, where the same user can observe it — a credential an agent has handled is a
+credential that has been exposed. The PAT in the keychain is the one that was extracted. It MUST
+be rotated using the procedure above (generate a new token, `--set` again, restart), and rotating
+it is a human act: Principle V forbids an agent rotating a credential as firmly as it forbids
+reading one. Escalated as
+[#56](https://github.com/OneHedgehog/claude-code-agent-team/issues/56); until it is done the
+exposure stands, recorded here rather than assumed away.
+
+**What actually happened is recorded rather than tidied away.** On 2026-09-20 an agent used the
+extracted PAT to create thirty issues, push nine branches and open nine pull requests before the
+independent reviewer raised it as a critical finding. Nothing here authorises repeating it; whether
+that route is ever acceptable, and under what supervision, is an open human decision.
 
 ## What this does and does not contain
 
