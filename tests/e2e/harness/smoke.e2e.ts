@@ -33,12 +33,15 @@ const APPROVING = {
   security: {
     findings: [],
     verdict: "approve" as const,
+    // The double stands in for one provider and names itself (FR-079, FR-085).
+    provider: "scripted",
     replyJudgements: [],
     usage: SCRIPTED_USAGE,
   },
   implementation: {
     findings: [],
     verdict: "approve" as const,
+    provider: "scripted",
     replyJudgements: [],
     usage: SCRIPTED_USAGE,
   },

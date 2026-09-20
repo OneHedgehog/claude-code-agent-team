@@ -149,6 +149,28 @@ GitHub enforces the part that matters: **only GitHub Apps can create check runs.
 token cannot report this gate whatever scopes it carries. That is a platform guarantee, not a
 convention this service maintains.
 
+## Reaching the model
+
+### Capacity advances the route; contract stops it dead
+
+Every failure carries a class, and the class decides everything:
+
+| Class | What it covers | Route advances |
+|---|---|---|
+| `capacity` | session or rate limit, exhausted credit, unreachable provider, an expired credential, an attempt that outran its bound | **yes** |
+| `contract` | a response that missed the schema, a refused tool, a turn that produced no verdict | **no** |
+
+The discriminator is whether a parseable response arrived at all. If none did, nothing has been
+said about the reviewed revision and asking someone else is reasonable. If one arrived and was
+unusable, that is a statement about *this* run — and a gate that keeps asking different providers
+until one approves is not a gate. Classification belongs to the client that made the call, because
+only it knows; an unclassified failure defaults to `contract`, which is the direction that fails
+closed.
+
+When every provider in a route has returned a capacity failure the gate **fails closed**, naming
+each provider tried and its class. No limit is raised, no required role is dropped, and no provider
+absent from the route is invented.
+
 ## How to run it
 
 ```bash

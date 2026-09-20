@@ -309,11 +309,15 @@ export function parseReviewResponse(
   parsed: unknown,
   usage: ModelUsage = ZERO_USAGE,
   onRejectedLocation?: RejectedLocation,
-): Omit<ReviewResponse, "usage"> {
+): Omit<ReviewResponse, "usage" | "provider"> {
   if (!validateResponse(parsed)) {
+    // `contract`, per R-022: a response arrived and failed to satisfy the schema, which is a
+    // statement about this run rather than about the provider's capacity. Asking a different
+    // provider would be shopping for a verdict (FR-078), so the route MUST NOT advance here.
     throw new ModelError(
       `model response did not satisfy the review schema: ${ajv.errorsText(validateResponse.errors)}`,
       usage,
+      { failureClass: "contract" },
     );
   }
 
@@ -468,12 +472,21 @@ export interface AnthropicOptions {
   readonly model?: string;
   /** Optional: called when a finding's location was refused. See `RejectedLocation`. */
   readonly onRejectedLocation?: RejectedLocation;
+  /**
+   * The provider name this client answers to, stamped onto every verdict and failure (FR-079).
+   *
+   * Defaults to `"api"`, which is the name the FR-081 migration synthesises for a legacy
+   * `modelTransport: "api"` file — so a pre-feature configuration reports the same provider name
+   * whether or not anyone declared one.
+   */
+  readonly providerName?: string;
 }
 
 export class AnthropicModelClient implements ModelClient {
   readonly #messages: MessagesApi;
   readonly #model: string;
   readonly #onRejectedLocation: RejectedLocation | undefined;
+  readonly #provider: string;
 
   /**
    * The credential is accepted so construction fails loudly on a malformed one, but it is never
@@ -495,6 +508,7 @@ export class AnthropicModelClient implements ModelClient {
     this.#messages = options.messages;
     this.#model = options.model ?? REVIEW_MODEL;
     this.#onRejectedLocation = options.onRejectedLocation;
+    this.#provider = options.providerName ?? "api";
   }
 
   async review(request: ReviewRequest): Promise<ReviewResponse> {
@@ -537,9 +551,14 @@ export class AnthropicModelClient implements ModelClient {
     } catch (error) {
       // The call never reached a response, so nothing was consumed. Reporting zero is still
       // reporting: the ledger records what happened rather than nothing at all (FR-031).
+      //
+      // `capacity` per R-022: no response arrived, so this says nothing about the reviewed
+      // revision. A rate limit, an exhausted balance and an unreachable endpoint all land here,
+      // and each is a reason to ask the next provider rather than to fail the diff.
       throw new ModelError(
         `model call failed: ${error instanceof Error ? error.message : String(error)}`,
         ZERO_USAGE,
+        { failureClass: "capacity", provider: this.#provider, cause: error },
       );
     }
 
@@ -547,7 +566,11 @@ export class AnthropicModelClient implements ModelClient {
     const text = readText(raw);
 
     if (text === null) {
-      throw new ModelError("model response carried no text content", usage);
+      // A response arrived and carried nothing usable — `contract`, not capacity.
+      throw new ModelError("model response carried no text content", usage, {
+        failureClass: "contract",
+        provider: this.#provider,
+      });
     }
 
     let parsed: unknown;
@@ -556,9 +579,29 @@ export class AnthropicModelClient implements ModelClient {
     } catch {
       // Prose is not a fallback. An implementation that cannot produce a structured verdict must
       // reject rather than return a default (contracts/model-client.md).
-      throw new ModelError("model response was not JSON; prose is never parsed", usage);
+      throw new ModelError("model response was not JSON; prose is never parsed", usage, {
+        failureClass: "contract",
+        provider: this.#provider,
+      });
     }
 
-    return { ...parseReviewResponse(parsed, usage, this.#onRejectedLocation), usage };
+    try {
+      return {
+        ...parseReviewResponse(parsed, usage, this.#onRejectedLocation),
+        usage,
+        provider: this.#provider,
+      };
+    } catch (error) {
+      // The shared parser cannot know which provider it is parsing for, so it throws without one
+      // (FR-057 keeps it shared). Naming it here is what makes the failure attributable (FR-079)
+      // without giving the parser a second seam.
+      throw error instanceof ModelError
+        ? new ModelError(error.message, error.usage, {
+            failureClass: error.failureClass,
+            provider: this.#provider,
+            cause: error,
+          })
+        : error;
+    }
   }
 }

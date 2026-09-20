@@ -6,7 +6,14 @@ import type {
   PullRequestContext,
   ReplyJudgement,
 } from "../../model/client.js";
-import { ModelError, totalTokens, ZERO_USAGE } from "../../model/client.js";
+import {
+  ModelError,
+  RouteExhaustedError,
+  totalTokens,
+  ZERO_USAGE,
+  type FailureClass,
+  type RouteAttempt,
+} from "../../model/client.js";
 import type { FindingDraftInput } from "../findings.js";
 import { missingVerdict, type RoleOutcome } from "../gate.js";
 
@@ -41,6 +48,18 @@ export interface RoleResult {
   /** Always reported, including on the error path, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
   readonly tokensConsumed: number;
+  /**
+   * Which provider produced this verdict, or failed trying (FR-079).
+   *
+   * Carried on both paths. On the failure path it is what lets the record name who was asked
+   * rather than reporting an anonymous missing verdict, and a verdict whose author is
+   * unrecorded cannot be weighed later against that provider's track record (Principle VII).
+   */
+  readonly provider: string;
+  /** Present only on the failure path: whether the route was allowed to advance (FR-078). */
+  readonly failureClass?: FailureClass;
+  /** Every provider asked, in order, when a route was exhausted (FR-080). */
+  readonly attempts?: readonly RouteAttempt[];
 }
 
 export interface ReviewerRole {
@@ -89,6 +108,7 @@ export async function runRole(
       replyJudgements: response.replyJudgements,
       usage: response.usage,
       tokensConsumed: totalTokens(response.usage),
+      provider: response.provider,
     };
   } catch (error) {
     const usage = error instanceof ModelError ? error.usage : ZERO_USAGE;
@@ -102,6 +122,12 @@ export async function runRole(
       replyJudgements: [],
       usage,
       tokensConsumed: totalTokens(usage),
+      // A route that was exhausted has several providers to name; a single failure has one. Both
+      // are recorded rather than collapsed, because "which provider failed" and "how many were
+      // tried" are different questions and an operator asks both (FR-079, FR-080).
+      provider: error instanceof ModelError ? error.provider : "unknown",
+      ...(error instanceof ModelError ? { failureClass: error.failureClass } : {}),
+      ...(error instanceof RouteExhaustedError ? { attempts: error.attempts } : {}),
     };
   }
 }
