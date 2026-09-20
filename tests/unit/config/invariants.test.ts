@@ -209,3 +209,171 @@ describe("the shared host section (FR-050 as R-019 corrects its reading)", () =>
     expect(loaded.host.maxConcurrentAgents).toBe(3);
   });
 });
+
+/**
+ * The routing declaration rules (006: FR-076, FR-084, FR-086, R-021, R-026).
+ *
+ * Every one is a *preflight* failure, before any model call. They live here rather than in the
+ * schema for the same reason the budget invariants above do — JSON Schema cannot express a rule
+ * that spans fields — and they ship in the same pull request as the shape they validate, because
+ * a configuration surface and the rules that make it safe are one change, not two.
+ */
+
+const CONTAINMENT = {
+  noTools: true,
+  noInheritedSettings: true,
+  noWorkingTreeAccess: true,
+  allowlistedEnvironment: true,
+  emptyWorkingDirectory: true,
+  otherCredentialsNeutralised: true,
+} as const;
+
+function provider(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    models: { high: "gemini-3.1-pro-high", low: "gemini-3.1-pro-low" },
+    family: "gemini",
+    transport: "cli",
+    funding: "subscription",
+    account: "a",
+    credential: { source: "oauth-profile" },
+    containment: { ...CONTAINMENT },
+    ...overrides,
+  };
+}
+
+/** A valid routed file: one account, providers and a route per required role. */
+function routedFile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return validFile({
+    accounts: { a: { budget: 8_000_000, reserve: 2_000_000 } },
+    providers: {
+      p1: provider(),
+      // A second family, pinned consistently. Declaring `gpt-oss` while keeping the gemini
+      // identifiers is exactly the R-021 mismatch the rules below refuse.
+      p2: provider({ family: "gpt-oss", models: { high: "gpt-oss-120b-medium" } }),
+    },
+    routes: { security: ["p1"], implementation: ["p1"] },
+    ...overrides,
+  });
+}
+
+describe("route declaration rules", () => {
+  it("accepts a well-formed routed file", () => {
+    expect(() => validateSettings(routedFile())).not.toThrow();
+  });
+
+  it("stops the run when a required role has no route", () => {
+    expect(() => validateSettings(routedFile({ routes: { security: ["p1"] } }))).toThrow(
+      SettingsError,
+    );
+  });
+
+  it("stops the run when a route names an undeclared provider", () => {
+    expect(() =>
+      validateSettings(routedFile({ routes: { security: ["nope"], implementation: ["p1"] } })),
+    ).toThrow(SettingsError);
+  });
+
+  it("stops the run when a provider appears twice in one route", () => {
+    // The second entry buys nothing: a capacity failure will not have cleared between them.
+    expect(() =>
+      validateSettings(routedFile({ routes: { security: ["p1", "p1"], implementation: ["p1"] } })),
+    ).toThrow(SettingsError);
+  });
+
+  it("stops the run when a provider draws on an undeclared account", () => {
+    expect(() =>
+      validateSettings(routedFile({ providers: { p1: provider({ account: "ghost" }) } })),
+    ).toThrow(SettingsError);
+  });
+
+  it("stops the run when an account's reserve is not below its budget", () => {
+    expect(() =>
+      validateSettings(routedFile({ accounts: { a: { budget: 100, reserve: 100 } } })),
+    ).toThrow(SettingsError);
+  });
+
+  it("stops the run when `modelTransport` is declared alongside `providers`", () => {
+    // Two descriptions of how a model is reached is one more than can be true. The alias is
+    // retained for the migration alone.
+    expect(() => validateSettings(routedFile({ modelTransport: "agent-sdk" }))).toThrow(
+      SettingsError,
+    );
+  });
+});
+
+describe("the FR-086 arithmetic invariant", () => {
+  it("accepts a route whose attempts fit inside maxQueueWaitSeconds", () => {
+    // 6 x 300s = 1800s, exactly the shipped default — the longest route R-026 permits.
+    const six = Object.fromEntries(
+      ["p1", "p2", "p3", "p4", "p5", "p6"].map((n) => [n, provider()]),
+    );
+    expect(() =>
+      validateSettings(
+        routedFile({
+          providers: six,
+          routes: { security: Object.keys(six), implementation: ["p1"] },
+          maxQueueWaitSeconds: 1800,
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("stops the run when a route could outlast the wait everything queued behind it agreed to", () => {
+    const seven = Object.fromEntries(
+      ["p1", "p2", "p3", "p4", "p5", "p6", "p7"].map((n) => [n, provider()]),
+    );
+    expect(() =>
+      validateSettings(
+        routedFile({
+          providers: seven,
+          routes: { security: Object.keys(seven), implementation: ["p1"] },
+          maxQueueWaitSeconds: 1800,
+        }),
+      ),
+    ).toThrow(SettingsError);
+  });
+});
+
+describe("model pinning (R-021) and the effort map (FR-060)", () => {
+  it("stops the run when a provider pins no model at all", () => {
+    // A vendor default is a family the FR-082 check never saw.
+    expect(() =>
+      validateSettings(routedFile({ providers: { p1: provider({ models: {} }) } })),
+    ).toThrow(SettingsError);
+  });
+
+  it("stops the run when the configured effort has no pinned model", () => {
+    // `gemini-3.1-pro` is offered at high and low only; there is no -medium in the catalogue.
+    expect(() =>
+      validateSettings(
+        routedFile({
+          modelEffort: "medium",
+          providers: { p1: provider() },
+          routes: { security: ["p1"], implementation: ["p1"] },
+        }),
+      ),
+    ).toThrow(SettingsError);
+  });
+
+  it("accepts the configured effort when the provider pins a model for it", () => {
+    expect(() =>
+      validateSettings(
+        routedFile({
+          modelEffort: "medium",
+          providers: { p1: provider({ models: { medium: "gemini-3.8-flash-medium" } }) },
+          routes: { security: ["p1"], implementation: ["p1"] },
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("does not demand a pinned model of the migrated provider", () => {
+    // SC-005: a pre-feature file pinned nothing and must keep working untouched. The rules run
+    // over the declared section and never see the synthesised provider.
+    const loaded = validateSettings(validFile({ modelTransport: "agent-sdk" }));
+
+    expect(loaded.settings.migratedFromModelTransport).toBe(true);
+    expect(loaded.settings.providers["agent-sdk"]?.models).toEqual({});
+    expect(loaded.settings.routes.security).toEqual(["agent-sdk"]);
+  });
+});

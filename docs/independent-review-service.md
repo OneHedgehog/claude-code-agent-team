@@ -234,6 +234,28 @@ When every provider in a route has returned a capacity failure the gate **fails 
 each provider tried and its class. No limit is raised, no required role is dropped, and no provider
 absent from the route is invented.
 
+### What preflight refuses, before any spend
+
+An empty route, or a required role with no route. A route naming an undeclared provider, or the
+same provider twice. A provider drawing on an undeclared account, or an account whose reserve is
+not below its budget. A provider pinning no model, or pinning one whose identifier names a
+different family than it declares. A configured `modelEffort` with no pinned model on some routed
+provider — never a silent downgrade to whichever model happens to be present. A route long enough
+to outlast the queue's promise. And `modelTransport` declared alongside `providers`, because two
+descriptions of how a model is reached is one more than can be true.
+
+### Configurations written before routing existed
+
+`modelTransport` is retained as a deprecated alias, read only by the migration. A file declaring it
+and a single budget is read as the single-provider, single-account configuration it describes: one
+synthesised account carrying the former budget and reserve, one synthesised provider named after
+the transport, and a single-entry route for every required role. No operator action is required.
+
+The synthesised provider pins no model, and the declaration rules never inspect it — a pre-feature
+file pinned nothing, and demanding one would break the promise that it keeps working. Such a file
+loads, resolves and reports exactly as before. Its **timing** changes, by the five-minute bound
+above; that is the one behavioural difference and it is deliberate.
+
 ## How to run it
 
 ```bash

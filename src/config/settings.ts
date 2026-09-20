@@ -120,6 +120,23 @@ export interface AuthoringProvider {
  */
 export const ATTEMPT_BOUND_MS = 5 * 60 * 1000;
 
+/**
+ * Model-family tokens recognisable from a model identifier.
+ *
+ * Deliberately a short allowlist rather than a parser. The check it powers is one-directional:
+ * a declaration whose pinned model *names* a family different from the declared one is refused,
+ * and an identifier matching nothing here is accepted, because this service has no catalogue and
+ * guessing would refuse valid configurations. It is a guard against the specific R-021 trap —
+ * an aggregator serving the authoring family under another vendor's label — not a general
+ * validator.
+ */
+const FAMILY_TOKENS: readonly string[] = ["claude", "gemini", "gpt-oss", "gpt"];
+
+function familyOfModel(model: string): string | undefined {
+  const lower = model.toLowerCase();
+  return FAMILY_TOKENS.find((token) => lower.startsWith(token));
+}
+
 export interface EscalationChannel {
   readonly type: "github-issue";
   readonly assignee: string;
@@ -302,6 +319,139 @@ function invariantProblems(
   return problems;
 }
 
+/**
+ * The routing declaration rules (FR-076, FR-081, FR-084, FR-086, R-021, R-026).
+ *
+ * Every one is a preflight failure, before any model call. They run over the **declared** section
+ * only: the provider the migration synthesises is never inspected here, because a pre-feature
+ * file declared no model and no containment and SC-005 promises it keeps working untouched.
+ *
+ * Collected rather than short-circuited, like the budget invariants above, so one run tells an
+ * operator everything that is wrong instead of one thing at a time.
+ */
+function routingProblems(
+  section: Record<string, unknown>,
+  requiredRoles: readonly RoleName[],
+  effort: ModelEffort,
+): string[] {
+  const providers = section["providers"] as Record<string, Record<string, unknown>> | undefined;
+  if (providers === undefined) return [];
+
+  const problems: string[] = [];
+  const at = "settings.reviewService";
+
+  // The alias is read by the migration alone. Declaring both leaves two answers to "how is the
+  // model reached", and nothing here could pick between them without inventing a precedence rule
+  // nobody asked for.
+  if (section["modelTransport"] !== undefined) {
+    problems.push(
+      `${at}: \`modelTransport\` is deprecated and MUST NOT be declared alongside \`providers\` — ` +
+        `two descriptions of how a model is reached is one more than can be true`,
+    );
+  }
+
+  const accounts = (section["accounts"] ?? {}) as Record<
+    string,
+    { budget: number; reserve: number }
+  >;
+  for (const [name, account] of Object.entries(accounts)) {
+    if (account.reserve >= account.budget) {
+      problems.push(
+        `${at}.accounts.${name}: reserve (${account.reserve}) must be less than budget (${account.budget})`,
+      );
+    }
+  }
+
+  for (const [name, provider] of Object.entries(providers)) {
+    const account = provider["account"] as string;
+    if (!(account in accounts)) {
+      problems.push(`${at}.providers.${name}: draws on undeclared account \`${account}\``);
+    }
+
+    const models = (provider["models"] ?? {}) as Partial<Record<ModelEffort, string>>;
+    const pinned = Object.entries(models).filter(([, id]) => typeof id === "string" && id !== "");
+
+    if (pinned.length === 0) {
+      problems.push(
+        `${at}.providers.${name}: pins no model. A vendor default can change between releases, ` +
+          `and a family nobody pinned is a family the FR-082 independence check never saw (R-021)`,
+      );
+    }
+
+    const declaredFamily = (provider["family"] as string).toLowerCase();
+    for (const [level, id] of pinned) {
+      const named = familyOfModel(id);
+      if (named !== undefined && named !== declaredFamily) {
+        problems.push(
+          `${at}.providers.${name}.models.${level}: pins \`${id}\`, which names family ` +
+            `\`${named}\`, but the provider declares \`${declaredFamily}\` — the FR-082 check ` +
+            `compares families, so a label the invocation contradicts defeats it`,
+        );
+      }
+    }
+  }
+
+  const declaredRoutes = (section["routes"] ?? {}) as Partial<Record<RoleName, string[]>>;
+  const boundSeconds = ATTEMPT_BOUND_MS / 1000;
+  const maxQueueWaitSeconds = section["maxQueueWaitSeconds"] as number;
+
+  for (const role of requiredRoles) {
+    const route = declaredRoutes[role];
+
+    if (route === undefined || route.length === 0) {
+      problems.push(
+        `${at}.routes.${role}: a required reviewer role has no route. There is no implicit ` +
+          `fallback to some default provider (FR-076)`,
+      );
+      continue;
+    }
+
+    for (const name of route) {
+      if (!(name in providers)) {
+        problems.push(`${at}.routes.${role}: names undeclared provider \`${name}\` (FR-084)`);
+        continue;
+      }
+
+      // Checked per routed provider rather than per declared one: a provider nobody routes to
+      // cannot serve a request, so its effort coverage is not yet anybody's problem.
+      const models = (providers[name]?.["models"] ?? {}) as Partial<Record<ModelEffort, string>>;
+      if (models[effort] === undefined) {
+        problems.push(
+          `${at}.routes.${role}: provider \`${name}\` pins no model for the configured ` +
+            `modelEffort \`${effort}\` (it has ${Object.keys(models).join(", ") || "none"}). ` +
+            `Effort is expressed by the pinned identifier (R-020), so this must stop preflight ` +
+            `rather than downgrade silently — FR-060 makes reporting an effort you do not apply ` +
+            `worse than not reporting one`,
+        );
+      }
+    }
+
+    const seen = new Set<string>();
+    for (const name of route) {
+      if (seen.has(name)) {
+        problems.push(
+          `${at}.routes.${role}: lists provider \`${name}\` twice. The second entry buys nothing — ` +
+            `a capacity failure will not have cleared between them`,
+        );
+      }
+      seen.add(name);
+    }
+
+    // R-026: per-attempt bounds are only safe because of this arithmetic, so it is checked
+    // rather than assumed. At the shipped default of 1800s the longest route is six.
+    if (route.length * boundSeconds > maxQueueWaitSeconds) {
+      problems.push(
+        `${at}.routes.${role}: ${route.length} attempts at ${boundSeconds}s each could take ` +
+          `${route.length * boundSeconds}s, past maxQueueWaitSeconds (${maxQueueWaitSeconds}). ` +
+          `One review would hold the only slot longer than everything queued behind it agreed ` +
+          `to wait (FR-086)`,
+      );
+    }
+  }
+
+  return problems;
+}
+
 /** The account and provider names the migration synthesises. Stable, so records stay comparable. */
 export const MIGRATED_ACCOUNT_NAME = "default";
 
@@ -421,7 +571,14 @@ export function validateSettings(raw: unknown): LoadedSettings {
     host: Record<string, unknown>;
   };
 
-  const problems = invariantProblems(section, host);
+  const problems = [
+    ...invariantProblems(section, host),
+    ...routingProblems(
+      section,
+      section["requiredReviewerRoles"] as readonly RoleName[],
+      (section["modelEffort"] ?? DEFAULTS.modelEffort) as ModelEffort,
+    ),
+  ];
   if (problems.length > 0) {
     throw new SettingsError(problems);
   }
