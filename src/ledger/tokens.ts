@@ -24,25 +24,68 @@ export interface LedgerEntry {
   readonly actor: Actor;
   readonly resource: Resource;
   readonly amount: number;
+  /**
+   * Which provider incurred the draw (FR-081).
+   *
+   * Optional in the type and required in practice: entries already on disk predate the field,
+   * and R-024 attributes those to the provider the migration synthesised rather than discarding
+   * them. New entries always carry it — attribution is what Principle VII weighs later.
+   */
+  readonly provider?: string;
+  /**
+   * Which funding account was charged (FR-081).
+   *
+   * Two fields rather than one, because the levels differ: `provider` is what the draw is
+   * attributed to, `account` is what the reserve is checked against. An entry carrying only a
+   * provider cannot be checked against any reserve once one account serves several providers.
+   */
+  readonly account?: string;
 }
 
 export type CheckResult =
   { readonly allowed: true } | { readonly allowed: false; readonly reason: string };
 
 export interface Limits {
+  /**
+   * The flat token budget.
+   *
+   * Superseded by `accounts` where those are declared, and kept because platform requests still
+   * come from one place and because a configuration written before routing has only this.
+   */
   readonly tokenBudget: number;
   readonly reviewerTokenReserve: number;
   readonly platformApiBudget?: number;
   readonly platformApiReserve?: number;
+  /**
+   * Per-account token budgets (FR-081).
+   *
+   * When present these bound token spend and `tokenBudget` no longer does: tokens from different
+   * accounts are different resources, and summing them into one limit is what let a healthy
+   * total conceal an exhausted balance.
+   *
+   * `platformApiBudget` is deliberately untouched. GitHub requests come from one account and
+   * remain one resource — the same principle, arrived at from the other direction.
+   */
+  readonly accounts?: Readonly<
+    Record<string, { readonly budget: number; readonly reserve: number }>
+  >;
 }
 
 export interface Ledger {
   /** Pre-spend check. `review` alone may draw into the reserve (FR-047). */
-  check(target: string, actor: Actor, resource: Resource, estimate: number): CheckResult;
+  check(
+    target: string,
+    actor: Actor,
+    resource: Resource,
+    estimate: number,
+    /** Which account to check against. Omitted falls back to the flat budget. */
+    account?: string,
+  ): CheckResult;
   /** Append-only: never rewrites or compacts an existing entry. */
   record(entry: LedgerEntry): void;
-  total(resource: Resource): number;
-  remaining(resource: Resource): number;
+  /** Scoped to one account when given; the unscoped total is every account combined. */
+  total(resource: Resource, account?: string): number;
+  remaining(resource: Resource, account?: string): number;
   entries(): readonly LedgerEntry[];
 }
 
@@ -114,8 +157,33 @@ export function createLedger(options: {
   target: string;
   limits: Limits;
   store: LedgerStore;
+  /** The account an entry lacking one is attributed to (R-024). */
+  defaultAccount?: string;
+  /** The provider an entry lacking one is attributed to (R-024). */
+  defaultProvider?: string;
 }): Ledger {
-  const { target, limits, store } = options;
+  const { target, limits, store, defaultAccount, defaultProvider } = options;
+
+  /**
+   * R-024: an entry written before this feature carries neither field. Attributing it to the
+   * migrated account is the only reading consistent with what the operator actually spent —
+   * dropping it would under-count, and FR-031 exists to prevent exactly that.
+   */
+  const accountOf = (entry: LedgerEntry): string | undefined => entry.account ?? defaultAccount;
+
+  const limitsFor = (
+    resource: Resource,
+    account: string | undefined,
+  ): { budget: number; reserve: number } => {
+    if (resource === "tokens" && account !== undefined && limits.accounts !== undefined) {
+      const declared = limits.accounts[account];
+      if (declared === undefined) {
+        throw new Error(`ledger has no budget for account ${JSON.stringify(account)}`);
+      }
+      return declared;
+    }
+    return budgetFor(limits, resource);
+  };
 
   const requireTarget = (addressed: string): void => {
     if (addressed !== target) {
@@ -125,18 +193,19 @@ export function createLedger(options: {
     }
   };
 
-  const total = (resource: Resource): number =>
+  const total = (resource: Resource, account?: string): number =>
     store
       .readAll()
       .filter((entry) => entry.resource === resource)
+      .filter((entry) => account === undefined || accountOf(entry) === account)
       .reduce((sum, entry) => sum + entry.amount, 0);
 
   return {
-    check(addressed, actor, resource, estimate) {
+    check(addressed, actor, resource, estimate, account) {
       requireTarget(addressed);
 
-      const { budget, reserve } = budgetFor(limits, resource);
-      const spent = total(resource);
+      const { budget, reserve } = limitsFor(resource, account);
+      const spent = total(resource, account);
 
       // Review work may spend the whole budget; everything else stops at the reserve.
       const ceiling = actor === "review" ? budget : budget - reserve;
@@ -145,10 +214,11 @@ export function createLedger(options: {
         return { allowed: true };
       }
 
+      const where = account === undefined ? "" : ` on account ${JSON.stringify(account)}`;
       const reason =
         actor === "review"
-          ? `${resource} budget exhausted: ${spent} spent plus ${estimate} estimated exceeds the budget of ${budget}`
-          : `${resource} reserve reached: ${spent} spent plus ${estimate} estimated exceeds ${ceiling}, the budget of ${budget} less the reviewer reserve of ${reserve}`;
+          ? `${resource} budget exhausted${where}: ${spent} spent plus ${estimate} estimated exceeds the budget of ${budget}`
+          : `${resource} reserve reached${where}: ${spent} spent plus ${estimate} estimated exceeds ${ceiling}, the budget of ${budget} less the reviewer reserve of ${reserve}`;
 
       return { allowed: false, reason };
     },
@@ -159,13 +229,23 @@ export function createLedger(options: {
           `ledger amounts are non-negative integers; received ${String(entry.amount)}`,
         );
       }
-      store.append(entry);
+      // Attribution is filled in here rather than demanded of every caller, so that one place
+      // decides what an unattributed draw means and no call site can quietly omit it (FR-081).
+      store.append({
+        ...entry,
+        ...(entry.provider === undefined && defaultProvider !== undefined
+          ? { provider: defaultProvider }
+          : {}),
+        ...(entry.account === undefined && defaultAccount !== undefined
+          ? { account: defaultAccount }
+          : {}),
+      });
     },
 
     total,
 
-    remaining(resource) {
-      return budgetFor(limits, resource).budget - total(resource);
+    remaining(resource, account) {
+      return limitsFor(resource, account).budget - total(resource, account);
     },
 
     entries() {

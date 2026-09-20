@@ -283,6 +283,25 @@ and the gate closes exactly as it would have with a single provider. It is permi
 operator may want it, and reported because the only real danger is believing it bought
 availability it did not.
 
+### Budgets sit on the account; spend is attributed to the provider
+
+An account is what gets billed or throttled, so it is what a budget can bound. A provider is what
+produced a verdict, so it is what a draw is attributed to. The two levels are deliberate and they
+do different jobs.
+
+Budgeting per *provider* instead would let two providers on one account carry two budgets whose
+sum exceeds what the account holds — each passing its own reserve check while the shared quota was
+already gone. That is the concealment this design exists to prevent, reintroduced one level up.
+
+`review` remains the only actor permitted to draw into a reserve, now checked against the reserve
+of the account being charged. `platformApiBudget` is untouched: GitHub requests come from one
+account and genuinely are one resource, which is the same principle reached from the other side.
+
+Every ledger entry carries both its provider and its account. Entries written before this change
+carry neither, and are attributed to the account and provider the migration synthesised — the only
+reading consistent with what the operator actually spent. Dropping them would under-count, which
+is the failure the ledger exists to prevent.
+
 ### What preflight refuses, before any spend
 
 An empty route, or a required role with no route. A route naming an undeclared provider, or the
