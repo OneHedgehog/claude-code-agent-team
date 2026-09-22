@@ -14,6 +14,7 @@ import {
 } from "./anthropic.js";
 import {
   ModelError,
+  type FailureClass,
   type ModelClient,
   type ModelUsage,
   type ReviewRequest,
@@ -55,8 +56,19 @@ const SCHEMA_CORRECTION =
   "single JSON object matching it exactly -- no prose, no code fence, no properties the schema " +
   "does not name, and every required property present.";
 
-/** The wall-clock bound, and what it costs an operator: FR-066. */
-const DEADLINE_MS = 15 * 60 * 1000;
+/**
+ * The per-attempt wall-clock bound (FR-086, superseding FR-066's value).
+ *
+ * Five minutes, not fifteen. FR-086 moved the bound so that a route of up to six providers cannot
+ * outlast the thirty minutes `maxQueueWaitSeconds` promises whatever is queued behind it, and
+ * preflight checks that arithmetic rather than assuming it.
+ *
+ * What it costs is real and lands unevenly: a review that would have finished at eight minutes
+ * now expires. On a route with a second provider that expiry is a `capacity` failure and becomes
+ * a failover; on a route of one it is a missing verdict and a failed gate. FR-086 records that
+ * this bites hardest on the single-provider configuration FR-082 currently produces here.
+ */
+const DEADLINE_MS = 5 * 60 * 1000;
 
 /** FR-051 cannot catch this on a transport that resolves no credential, so the run names it. */
 export const HARNESS_NOT_AUTHENTICATED =
@@ -94,6 +106,21 @@ function earlyEndReason(subtype: string, refused: boolean): string {
 }
 
 /** What to call a harness failure, most specific cause first. */
+/**
+ * The R-022 line for this transport: did a parseable response arrive at all?
+ *
+ * Every case `reasonFor` distinguishes is one where none did — a deadline, an unauthenticated
+ * harness, a metered fallback, a subscription or rate limit, a call that simply failed. None is a
+ * statement about the reviewed revision, so all are `capacity` and the route MAY advance
+ * (FR-078). An expiring credential lands here too, which is scenario 42.
+ *
+ * The `contract` cases live at their own throw sites below, where more is known than a message:
+ * a refused tool (FR-064), an unmetered turn (FR-062), an empty answer, a schema miss (FR-059).
+ */
+function classifyFor(): FailureClass {
+  return "capacity";
+}
+
 function reasonFor(message: string, aborted: boolean, deadlineMs: number): string {
   if (aborted) return `the harness did not answer within ${Math.round(deadlineMs / 1000)}s`;
   if (looksUnauthenticated(message)) return `${HARNESS_NOT_AUTHENTICATED}: ${message}`;
@@ -122,6 +149,8 @@ export interface AgentSdkOptions {
    * if it does, a reviewed diff persuaded a tool-less reviewer to reach for a tool (FR-024).
    */
   readonly onRefusedTool?: (toolName: string) => void;
+  /** The provider name stamped onto every verdict and failure (FR-079). Defaults to `agent-sdk`. */
+  readonly providerName?: string;
   /** Told when a reply missed the schema and the harness is being asked again (FR-069). */
   readonly onSchemaRetry?: (attempt: number, role: ReviewRequest["role"]) => void;
   /** The environment the child's allowlist is drawn from. `process.env` unless a test says otherwise. */
@@ -224,6 +253,7 @@ export class AgentSdkModelClient implements ModelClient {
   readonly #onSchemaRetry: ((attempt: number, role: ReviewRequest["role"]) => void) | undefined;
   readonly #env: Record<string, string | undefined>;
   readonly #deadlineMs: number;
+  readonly #provider: string;
 
   constructor(options: AgentSdkOptions = {}) {
     this.#query = options.agentQuery ?? query;
@@ -232,6 +262,9 @@ export class AgentSdkModelClient implements ModelClient {
     this.#onSchemaRetry = options.onSchemaRetry;
     this.#env = options.env ?? process.env;
     this.#deadlineMs = options.deadlineMs ?? DEADLINE_MS;
+    // Defaults to the name the FR-081 migration synthesises for a legacy `agent-sdk` file, so a
+    // pre-feature configuration reports the same provider whether or not one was declared.
+    this.#provider = options.providerName ?? "agent-sdk";
   }
 
   /**
@@ -397,6 +430,7 @@ export class AgentSdkModelClient implements ModelClient {
       throw new ModelError(
         reasonFor(message, abort.signal.aborted, this.#deadlineMs),
         usage ?? floor,
+        { failureClass: classifyFor(), provider: this.#provider, cause: error },
       );
     } finally {
       // Best effort. An orphaned empty directory under the system temp root is a smaller problem
@@ -412,6 +446,7 @@ export class AgentSdkModelClient implements ModelClient {
       throw new ModelError(
         `the harness did not answer within ${Math.round(this.#deadlineMs / 1000)}s`,
         usage ?? floor,
+        { failureClass: "capacity", provider: this.#provider },
       );
     }
 
@@ -425,7 +460,13 @@ export class AgentSdkModelClient implements ModelClient {
       // result -- so with the guards the other way round, the most security-relevant event this
       // transport can produce (a reviewed diff talking a tool-less reviewer into reaching for a
       // tool) surfaced as a metering failure (Principle VII).
-      throw new ModelError(earlyEndReason(resultSubtype, refused), usage ?? floor);
+      throw new ModelError(earlyEndReason(resultSubtype, refused), usage ?? floor, {
+        // A refused tool is `contract`: a reviewed diff reached for a tool, which is a fact about
+        // this revision and must not be retried on another provider (FR-064). Any other early end
+        // produced no usable answer at all, which is `capacity`.
+        failureClass: refused ? "contract" : "capacity",
+        provider: this.#provider,
+      });
     }
 
     if (usage === null || usage.inputTokens + usage.outputTokens === 0) {
@@ -437,7 +478,10 @@ export class AgentSdkModelClient implements ModelClient {
       // null guard and reach the ledger as a completed review that cost nothing. A review that
       // produced an answer consumed tokens by construction, so zero is not a possible true value
       // here; it only ever means "not counted" (FR-062, FR-031).
-      throw new ModelError("harness reported no usage; the review cannot be metered", floor);
+      throw new ModelError("harness reported no usage; the review cannot be metered", floor, {
+        failureClass: "contract",
+        provider: this.#provider,
+      });
     }
 
     if (text.trim() === "") {
@@ -446,17 +490,32 @@ export class AgentSdkModelClient implements ModelClient {
       // without this check the empty string reached the parser, came back as "did not satisfy the
       // review schema", and was asked again -- spending a second time on the one shape a second ask
       // cannot improve. `AnthropicModelClient` has carried this check all along.
-      throw new ModelError("model response carried no text content", usage);
+      throw new ModelError("model response carried no text content", usage, {
+        failureClass: "contract",
+        provider: this.#provider,
+      });
     }
 
     // The spread is not redundant, though it reads that way: `parseReviewResponse` returns
     // `Omit<ReviewResponse, "usage">` and takes `usage` only to attach it to the `ModelError` it
     // may throw. The parser never carries it through on the success path, so this is where the
     // field comes from.
-    return {
-      ...parseReviewResponse(extractJson(text), usage, this.#onRejectedLocation),
-      usage,
-    };
+    try {
+      return {
+        ...parseReviewResponse(extractJson(text), usage, this.#onRejectedLocation),
+        usage,
+        provider: this.#provider,
+      };
+    } catch (error) {
+      // The shared parser has no provider to name (FR-057 keeps it shared), so it is named here.
+      throw error instanceof ModelError
+        ? new ModelError(error.message, error.usage, {
+            failureClass: error.failureClass,
+            provider: this.#provider,
+            cause: error,
+          })
+        : error;
+    }
   }
 }
 

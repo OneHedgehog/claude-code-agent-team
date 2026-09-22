@@ -116,7 +116,34 @@ export interface ReviewResponse {
   readonly replyJudgements: readonly ReplyJudgement[];
   /** Required on every response, including error paths that consumed tokens (FR-031). */
   readonly usage: ModelUsage;
+  /**
+   * Which provider produced this verdict (FR-079).
+   *
+   * A verdict whose author is unrecorded cannot be weighed later against that provider's track
+   * record (Principle VII), and once a role can fail over there is no longer one obvious answer
+   * to infer. It reaches the check-run output rather than only the host log (R-025), because that
+   * output is what `reconstruct.ts` rebuilds the ledger from.
+   */
+  readonly provider: string;
 }
+
+/**
+ * Whether a failure says anything about the reviewed revision (FR-078).
+ *
+ * `capacity` — a session limit, a rate limit, exhausted credit, an unreachable provider, an
+ * attempt that outran its bound. None of these is a statement about the diff, so the next
+ * provider in the route MAY be asked.
+ *
+ * `contract` — a response arrived and missed the schema (FR-059), a tool was refused (FR-064), or
+ * no verdict was produced (FR-007). Each is a statement about *this* run or *this* content.
+ * Asking a different provider would be shopping for a verdict, and a gate that keeps asking until
+ * something approves is not a gate.
+ *
+ * The discriminator across a subprocess boundary is whether a parseable response arrived at all
+ * (R-022). Classification belongs to the client that made the call — only it knows — and a router
+ * that guessed from an error message would reintroduce the generic call failure FR-078 forbids.
+ */
+export type FailureClass = "capacity" | "contract";
 
 export interface ModelClient {
   /**
@@ -131,14 +158,78 @@ export class ModelError extends Error {
   override readonly name = "ModelError";
   /** Tokens consumed before the failure, so the ledger cannot under-count (FR-031). */
   readonly usage: ModelUsage;
+  /**
+   * Whether the route may advance past this failure (FR-078).
+   *
+   * Defaulted to `contract` rather than `capacity`, and the direction matters: an unclassified
+   * failure treated as capacity would silently ask the next provider, which is the
+   * verdict-shopping FR-078 exists to prevent. Defaulting the other way costs at most a failover
+   * that could have happened, and a gate that fails closed is the behaviour Principle IV asks for
+   * when something is unknown.
+   */
+  readonly failureClass: FailureClass;
+  /** The provider that failed. Named in the record, never inferred (FR-079). */
+  readonly provider: string;
 
-  constructor(message: string, usage: ModelUsage = ZERO_USAGE, options?: { cause?: unknown }) {
+  constructor(
+    message: string,
+    usage: ModelUsage = ZERO_USAGE,
+    options?: { cause?: unknown; failureClass?: FailureClass; provider?: string },
+  ) {
     // `cause` is carried so a wrapped failure keeps the site it came from. A retry has to wrap in
     // order to attach the accumulated spend, and without this every failure leaving the loop was a
     // bare error whose stack pointed at the wrap rather than at what broke.
     super(message, options);
     this.usage = usage;
+    this.failureClass = options?.failureClass ?? "contract";
+    this.provider = options?.provider ?? "unknown";
   }
+}
+
+/** One provider's turn within a role's route (data-model.md → Attempt). */
+export interface RouteAttempt {
+  readonly provider: string;
+  /** Position in the route. Distinct from the review *round* (FR-075). */
+  readonly index: number;
+  readonly failureClass: FailureClass;
+  /** Charged even on failure, at no less than the prompt sent (FR-067). */
+  readonly usage: ModelUsage;
+}
+
+/**
+ * Every provider in a role's route returned a capacity failure (FR-080).
+ *
+ * It is a `ModelError` so that `runRole` turns it into a missing verdict exactly as it turns any
+ * other model failure into one — the gate fails closed with no new path through `role.ts`. Its
+ * class is `capacity` because that is what every attempt reported; nothing here says anything
+ * about the reviewed revision.
+ */
+export class RouteExhaustedError extends ModelError {
+  readonly attempts: readonly RouteAttempt[];
+
+  constructor(role: string, attempts: readonly RouteAttempt[]) {
+    const tried = attempts.map((a) => `${a.provider} (${a.failureClass})`).join(", ");
+    super(
+      `every provider in the ${role} route failed on capacity: ${tried}. ` +
+        `No verdict was produced for this revision, and the gate fails closed (FR-080).`,
+      sumUsage(attempts.map((a) => a.usage)),
+      { failureClass: "capacity", provider: attempts.at(-1)?.provider ?? "unknown" },
+    );
+    this.attempts = attempts;
+  }
+}
+
+/** Adds usage across attempts. A failed attempt still spent, so none of them is dropped. */
+export function sumUsage(all: readonly ModelUsage[]): ModelUsage {
+  return all.reduce<ModelUsage>(
+    (total, one) => ({
+      inputTokens: total.inputTokens + one.inputTokens,
+      outputTokens: total.outputTokens + one.outputTokens,
+      cacheWriteTokens: total.cacheWriteTokens + one.cacheWriteTokens,
+      cacheReadTokens: total.cacheReadTokens + one.cacheReadTokens,
+    }),
+    ZERO_USAGE,
+  );
 }
 
 export function totalTokens(usage: ModelUsage): number {

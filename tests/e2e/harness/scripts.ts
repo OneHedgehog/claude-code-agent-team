@@ -79,6 +79,10 @@ export function response(
 ): ReviewResponse {
   return {
     findings,
+    // The harness stands in for one provider (FR-085, R-023), so every response it builds names
+    // itself. A scenario asserting on attribution is asserting the thing failover most easily
+    // gets wrong.
+    provider: "scripted",
     // Derived rather than stated, exactly as `gate.ts` derives a role's decision: a script that
     // could say `approve` while carrying a blocking finding would let a scenario assert on a
     // combination the service can never produce (FR-008).

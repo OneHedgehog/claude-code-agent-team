@@ -106,6 +106,7 @@ function stubs(calls: Calls, overrides: Partial<ComposeOptions> = {}): ComposeOp
     review: (): Promise<ReviewResponse> =>
       Promise.resolve({
         verdict: "approve",
+        provider: "scripted",
         findings: [],
         replyJudgements: [],
         usage: { ...ZERO_USAGE, inputTokens: 100, outputTokens: 50 },
@@ -363,6 +364,7 @@ describe("a review reaches the platform through the root (FR-026, FR-027)", () =
 
         return Promise.resolve({
           verdict: "approve",
+          provider: "scripted",
           findings: [],
           replyJudgements: [],
           usage: { ...ZERO_USAGE, inputTokens: 10, outputTokens: 10 },
@@ -1083,6 +1085,7 @@ describe("the run record reports cache accounting (Principle IV)", () => {
       review: () =>
         Promise.resolve({
           verdict: "approve",
+          provider: "scripted",
           findings: [],
           replyJudgements: [],
           usage: {
