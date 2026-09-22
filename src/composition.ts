@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 
-import { loadSettings, type LoadedSettings, type RoleName } from "./config/settings.js";
+import {
+  MIGRATED_ACCOUNT_NAME,
+  loadSettings,
+  type LoadedSettings,
+  type RoleName,
+} from "./config/settings.js";
 import { resolveInTarget, targetSlug, type TargetRepository } from "./config/target.js";
 import {
   appIdPath,
@@ -48,6 +53,7 @@ import { createLedger, JsonlLedgerStore, type Ledger } from "./ledger/tokens.js"
 import Anthropic from "@anthropic-ai/sdk";
 
 import { AgentSdkModelClient, type AgentQuery } from "./model/agent-sdk.js";
+import { RoutingModelClient } from "./model/routing.js";
 import {
   AnthropicModelClient,
   MAX_OUTPUT_TOKENS,
@@ -653,6 +659,57 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
               }),
           }));
 
+  // FR-076: each required role is asked along its own ordered route, and the composite that does
+  // so is itself a `ModelClient` — so everything above the model boundary is untouched.
+  //
+  // In this release the only provider implementations are `api` and `agent-sdk`, which is exactly
+  // what a migrated pre-feature file resolves to: one synthesised provider named after its
+  // transport, and a single-entry route per role (SC-005). A declared `cli` provider parses and
+  // validates here but cannot yet be invoked — it arrives with the first provider that uses it,
+  // and until then it fails with a stated reason rather than silently doing nothing.
+  const clientFor = (providerName: string): ModelClient => {
+    const declared = settings.settings.providers[providerName];
+
+    // A test-supplied model stands in for every leaf, which is what keeps the existing
+    // integration suite meaningful: it substitutes the model boundary, not the router.
+    if (options.model !== undefined) return options.model;
+    if (declared === undefined) {
+      return unavailableModel(
+        `route names provider \`${providerName}\`, which is not declared; preflight should have refused this configuration`,
+      );
+    }
+    if (declared.transport === "cli") {
+      return unavailableModel(
+        `provider \`${providerName}\` uses the \`cli\` transport, which no adapter in this release implements`,
+      );
+    }
+    // The single client built above already carries this process's credential and logging. The
+    // migrated configuration routes to exactly it, under the name the migration gave it.
+    return model;
+  };
+
+  const routedModel: ModelClient =
+    options.model ??
+    new RoutingModelClient(
+      Object.fromEntries(
+        Object.entries(settings.settings.routes).map(([role, route]) => [
+          role,
+          route.map(clientFor),
+        ]),
+      ),
+      {
+        providerNames: Object.values(settings.settings.routes)[0] ?? [],
+      },
+    );
+
+  // FR-076 requires each role's route be "reported as effective with each run". Emitted once
+  // here, at composition, because that is where resolution actually happens — and after a
+  // migration it is the only place the synthesised single-entry route is visible at all.
+  logger.info("settings.resolved", {
+    routes: settings.settings.routes,
+    migratedFromModelTransport: settings.settings.migratedFromModelTransport,
+  });
+
   const ledger =
     options.ledger ??
     createLedger({
@@ -662,7 +719,19 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
         reviewerTokenReserve: settings.settings.reviewerTokenReserve,
         platformApiBudget: settings.settings.platformApiBudget,
         platformApiReserve: settings.settings.platformApiReserve,
+        // Per-account token limits bound model spend wherever accounts are declared (FR-081);
+        // the flat pair above still bounds platform requests, which genuinely are one resource.
+        accounts: Object.fromEntries(
+          Object.values(settings.settings.accounts).map((account) => [
+            account.name,
+            { budget: account.budget, reserve: account.reserve },
+          ]),
+        ),
       },
+      // R-024: an entry written before this feature carries no attribution, and the only reading
+      // consistent with what was actually spent is the account and provider the migration named.
+      defaultAccount: Object.keys(settings.settings.accounts)[0] ?? MIGRATED_ACCOUNT_NAME,
+      defaultProvider: Object.keys(settings.settings.providers)[0] ?? "unknown",
       store: new JsonlLedgerStore(ledgerPath(env, target)),
     });
 
@@ -676,7 +745,10 @@ export async function composeService(options: ComposeOptions): Promise<ServiceAd
     branchProtection: octokitBranchProtection(octokit),
     escalation: octokitEscalation(octokit),
     listOpenPullRequests: (params) => listOpenConditionally(octokit, params),
-    model,
+    // The composite, not the leaf: every role reaches the model along its own route (FR-076).
+    // With a migrated single-entry route this is the same one client wrapped once, which is why
+    // a pre-feature configuration behaves as it did.
+    model: routedModel,
     modelCredential,
     logger,
     ledger,

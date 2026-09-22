@@ -34,6 +34,7 @@ export const REVIEW_EVENTS = [
   "tick.completed",
   "queue.wait_started",
   "queue.wait_exceeded",
+  "settings.resolved",
   "role.started",
   "role.verdict",
   "role.verdict_missing",
@@ -68,11 +69,45 @@ export interface RecordFields {
   readonly state?: string;
   readonly role?: "security" | "implementation";
   readonly verdict?: "approve" | "request-changes";
+  /**
+   * Which provider produced this role's verdict, or failed trying (FR-079).
+   *
+   * Required reading for Principle VII: a verdict whose author is unrecorded cannot be weighed
+   * later against that provider's track record, and once a role can fail over there is no longer
+   * one obvious answer to infer.
+   */
+  readonly provider?: string;
+  /**
+   * Whether the failure let the route advance (FR-078).
+   *
+   * Recorded so the two classes stay distinguishable in the record rather than collapsing into a
+   * generic call failure — which is the distinction the whole routing decision rests on.
+   */
+  readonly failureClass?: "capacity" | "contract";
+  /** Every provider asked for this role, in order, with how each ended (FR-080, SC-002). */
+  readonly attempts?: readonly {
+    readonly provider: string;
+    readonly index: number;
+    readonly outcome: "verdict" | "capacity" | "contract";
+  }[];
   readonly prerequisites?: {
     readonly permissionsHeld: boolean;
     readonly gateRequiredByBranchProtection: boolean;
     readonly baseBranch?: string;
     readonly missing?: readonly string[];
+    /** Routed providers whose credential preflight could not find (FR-084). */
+    readonly providersMissingCredentials?: readonly string[];
+    /**
+     * Routes whose entries share one funding account (R-029).
+     *
+     * Not a failure, and recorded for exactly that reason: such a route is independent without
+     * being resilient, and the only real danger is an operator believing it satisfies SC-001.
+     */
+    readonly sharedAccounts?: readonly {
+      readonly role: string;
+      readonly account: string;
+      readonly providers: readonly string[];
+    }[];
   };
   readonly excludedPaths?: {
     readonly count: number;
@@ -80,6 +115,16 @@ export interface RecordFields {
     readonly source?: readonly ("vcs-binary" | "declared-pattern")[];
   };
   readonly effectiveOptionalSettings?: Readonly<Record<string, unknown>>;
+  /**
+   * Each required role's resolved route, reported once per run (FR-076, FR-054).
+   *
+   * Resolved rather than defaulted, which is why it is reported here and not among the optional
+   * settings: after a migration this is the only place the synthesised single-entry route appears
+   * at all, and a route nobody can read back is not "reported as effective".
+   */
+  readonly routes?: Readonly<Record<string, readonly string[]>>;
+  /** True when routes and providers were migrated from `modelTransport` rather than declared. */
+  readonly migratedFromModelTransport?: boolean;
   /**
    * A location the model produced that was refused and downgraded to pull-request level. One of
    * its causes is model output naming a path outside the checkout, which is a security boundary

@@ -41,6 +41,7 @@
         "tick.completed",
         "queue.wait_started",
         "queue.wait_exceeded",
+        "settings.resolved",
         "role.started",
         "role.verdict",
         "role.verdict_missing",
@@ -74,6 +75,43 @@
     },
     "role": { "enum": ["security", "implementation"] },
     "verdict": { "enum": ["approve", "request-changes"] },
+    "routes": {
+      "description": "Each required role's resolved provider route, reported once per run on settings.resolved (FR-076, FR-054). Resolved rather than defaulted: after an FR-081 migration this is the only place the synthesised single-entry route appears, and a route nobody can read back is not reported.",
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+    },
+    "migratedFromModelTransport": {
+      "description": "True when providers and routes were synthesised from the deprecated `modelTransport` alias rather than declared (SC-005).",
+      "type": "boolean"
+    },
+    "provider": {
+      "description": "Which provider produced this role's verdict, or failed trying (FR-079). A verdict whose author is unrecorded cannot be weighed later against that provider's track record (Principle VII).",
+      "type": "string",
+      "minLength": 1
+    },
+    "failureClass": {
+      "description": "Whether the failure let the route advance (FR-078). `capacity` says nothing about the reviewed revision and the next provider MAY be asked; `contract` is a statement about this run or this content and the route MUST NOT advance. Recorded separately so the two never collapse into a generic call failure.",
+      "enum": ["capacity", "contract"]
+    },
+    "attempts": {
+      "description": "Every provider asked for this role, in order, with how each ended (FR-080, SC-002). Present on role.verdict_missing when a route was exhausted, so the stated reason names each provider tried and its class.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "index", "outcome"],
+        "properties": {
+          "provider": { "type": "string", "minLength": 1 },
+          "index": {
+            "description": "Position in the route. Distinct from `round`, which means the review round (FR-075).",
+            "type": "integer",
+            "minimum": 0
+          },
+          "outcome": { "enum": ["verdict", "capacity", "contract"] }
+        }
+      }
+    },
     "tick": {
       "description": "The daemon's per-tick heartbeat: what it saw, what it selected, and why it passed over the rest.",
       "type": "object",
@@ -124,6 +162,25 @@
           "type": "boolean"
         },
         "baseBranch": { "type": "string" },
+        "providersMissingCredentials": {
+          "description": "Routed providers whose credential preflight could not find (FR-084). A last-resort entry is held to the same standard as a first one: a fallback nobody verified is not a fallback.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sharedAccounts": {
+          "description": "Routes whose entries draw on one funding account (R-029). Not a failure — reported so a route that is independent without being resilient is not mistaken for one that satisfies SC-001.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "account", "providers"],
+            "properties": {
+              "role": { "type": "string" },
+              "account": { "type": "string" },
+              "providers": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
         "missing": {
           "description": "What was absent, named so a human can act on it (FR-024).",
           "type": "array",

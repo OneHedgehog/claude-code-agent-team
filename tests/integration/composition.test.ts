@@ -23,6 +23,7 @@ import { validateSettings, type LoadedSettings } from "../../src/config/settings
 import { MAX_OUTPUT_TOKENS } from "../../src/model/anthropic.js";
 import { createLogger } from "../../src/observability/logger.js";
 import { ZERO_USAGE, type ModelClient, type ReviewResponse } from "../../src/model/client.js";
+import { RoutingModelClient } from "../../src/model/routing.js";
 import { AgentSdkModelClient, type AgentQuery } from "../../src/model/agent-sdk.js";
 
 /**
@@ -1042,7 +1043,12 @@ describe("both transports are composed, whichever one the repository operates on
 
     // The specific class, not merely "something was built". `expect(model).toBeDefined()` is
     // satisfied by `unavailableModel` too, and so distinguishes none of the three constructions.
-    expect(adapters.model).toBeInstanceOf(AgentSdkModelClient);
+    // Through the route rather than at the top: `adapters.model` is the routing composite now
+    // (FR-076), and the claim worth making is still about the leaf the role actually reaches.
+    expect(adapters.model).toBeInstanceOf(RoutingModelClient);
+    expect((adapters.model as RoutingModelClient).providersFor("security")[0]).toBeInstanceOf(
+      AgentSdkModelClient,
+    );
     // No credential is resolved on this path -- the harness authenticates itself -- so FR-051 must
     // see a source rather than an absence, or every run would stop on a missing credential.
     expect(adapters.modelCredential).toEqual({ source: "agent-sdk", apiKey: null });
