@@ -135,3 +135,110 @@ describe("the addressing interface (FR-047)", () => {
     expect(led.check(TARGET, "review", "tokens", 1).allowed).toBe(false);
   });
 });
+
+/**
+ * Per-account budgets (FR-081, R-024, R-029).
+ *
+ * The account is the thing that gets billed or throttled, so it is the thing a budget can bound.
+ * Attribution stays finer: a draw is recorded against the *provider* that incurred it, because
+ * that is what Principle VII weighs later and what SC-003 needs readable on its own.
+ *
+ * Budgeting per provider instead would let two providers on one account carry two budgets whose
+ * sum exceeds what the account holds, each passing its own reserve check while the shared quota
+ * was already gone — the concealment FR-081 exists to prevent, one level up.
+ */
+describe("per-account budgets and reserves", () => {
+  const ACCOUNTS = {
+    subscription: { budget: 1000, reserve: 200 },
+    api: { budget: 500, reserve: 100 },
+  };
+
+  function accountLedger(entries: readonly LedgerEntry[] = []) {
+    return createLedger({
+      target: "o/r",
+      limits: { tokenBudget: 1500, reviewerTokenReserve: 300, accounts: ACCOUNTS },
+      store: new InMemoryLedgerStore(entries),
+      defaultAccount: "subscription",
+      defaultProvider: "claude-subscription",
+    });
+  }
+
+  function spend(account: string, provider: string, amount: number): LedgerEntry {
+    return {
+      runId: "r1",
+      at: "2026-09-20T00:00:00.000Z",
+      actor: "review",
+      resource: "tokens",
+      amount,
+      account,
+      provider,
+    };
+  }
+
+  it("bounds each account by its own budget, not by a shared total", () => {
+    const ledger = accountLedger([spend("api", "claude-api", 450)]);
+
+    // The api account is nearly gone; the subscription account is untouched. A single total
+    // would have said 450 of 1500 and waved both through.
+    expect(ledger.check("o/r", "review", "tokens", 100, "api").allowed).toBe(false);
+    expect(ledger.check("o/r", "review", "tokens", 100, "subscription").allowed).toBe(true);
+  });
+
+  it("keeps the reserve per account, with `review` the only actor allowed into it", () => {
+    const ledger = accountLedger([spend("subscription", "claude-subscription", 750)]);
+
+    // 1000 budget less the 200 reserve leaves 800 for non-review work.
+    expect(ledger.check("o/r", "authoring", "tokens", 100, "subscription").allowed).toBe(false);
+    expect(ledger.check("o/r", "review", "tokens", 100, "subscription").allowed).toBe(true);
+  });
+
+  it("makes two providers on one account draw on one limit (R-029)", () => {
+    // The whole reason budgets sit on the account: these are two providers and one quota.
+    const ledger = accountLedger([
+      spend("subscription", "claude-subscription", 500),
+      spend("subscription", "claude-other", 400),
+    ]);
+
+    expect(ledger.total("tokens", "subscription")).toBe(900);
+    expect(ledger.check("o/r", "review", "tokens", 200, "subscription").allowed).toBe(false);
+  });
+
+  it("reports what remains per account", () => {
+    const ledger = accountLedger([spend("api", "claude-api", 200)]);
+
+    expect(ledger.remaining("tokens", "api")).toBe(300);
+    expect(ledger.remaining("tokens", "subscription")).toBe(1000);
+  });
+
+  it("keeps spend attributable per provider even when the limit is per account", () => {
+    const ledger = accountLedger([
+      spend("subscription", "claude-subscription", 100),
+      spend("subscription", "claude-other", 250),
+    ]);
+
+    const byProvider = ledger.entries().filter((e) => e.provider === "claude-other");
+    expect(byProvider.reduce((n, e) => n + e.amount, 0)).toBe(250);
+  });
+
+  it("attributes a pre-feature entry carrying no account to the migrated one (R-024)", () => {
+    // Entries already on disk predate the field. The only reading consistent with what the
+    // operator actually spent is the single account the migration synthesised.
+    const legacy: LedgerEntry = {
+      runId: "old",
+      at: "2026-09-01T00:00:00.000Z",
+      actor: "review",
+      resource: "tokens",
+      amount: 900,
+    };
+    const ledger = accountLedger([legacy]);
+
+    expect(ledger.total("tokens", "subscription")).toBe(900);
+    expect(ledger.check("o/r", "review", "tokens", 200, "subscription").allowed).toBe(false);
+  });
+
+  it("still answers the unscoped question, so a caller that has no account keeps working", () => {
+    const ledger = accountLedger([spend("api", "claude-api", 200)]);
+
+    expect(ledger.total("tokens")).toBe(200);
+  });
+});
