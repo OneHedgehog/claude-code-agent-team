@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { checkPrerequisites, type PrerequisiteInput } from "../../../src/review/prerequisites.js";
+import {
+  checkPrerequisites,
+  independenceProblem,
+  missingProviderCredentials,
+  sharedAccountRoutes,
+  type PrerequisiteInput,
+} from "../../../src/review/prerequisites.js";
+import type { ModelCredential } from "../../../src/model/anthropic.js";
 import {
   classifyProtectionResponse,
   isGateRequired,
@@ -285,5 +292,183 @@ describe("checkPrerequisites — every failing path is free and silent (FR-051)"
 
     expect(result.tokensSpent).toBe(0);
     expect(result.verdicts).toHaveLength(0);
+  });
+});
+
+describe("reviewer independence from the authoring family (FR-082, R-021)", () => {
+  const gemini = { family: "gemini" } as const;
+  const claudeViaAggregator = { family: "claude" } as const;
+
+  it("holds when no route touches the authoring family", () => {
+    expect(
+      independenceProblem({
+        providers: { "antigravity-gemini": gemini },
+        routes: { security: ["antigravity-gemini"], implementation: ["antigravity-gemini"] },
+        authoringProvider: { name: "claude-code", family: "claude" },
+      }),
+    ).toBeNull();
+  });
+
+  it("does not run at all when no authoring provider is declared", () => {
+    // Not a loophole: FR-082 requires the author be named explicitly, and with no subject there
+    // is nothing to compare against. It is also what keeps a pre-feature file working (SC-005).
+    expect(
+      independenceProblem({
+        providers: { "agent-sdk": claudeViaAggregator },
+        routes: { security: ["agent-sdk"], implementation: ["agent-sdk"] },
+      }),
+    ).toBeNull();
+  });
+
+  it("catches an aggregator serving the authoring family under another vendor's name", () => {
+    // The R-021 trap: the vendor label reads `antigravity`, the family is the author's own.
+    const problem = independenceProblem({
+      providers: { "antigravity-claude": claudeViaAggregator, "antigravity-gemini": gemini },
+      routes: { security: ["antigravity-claude"], implementation: ["antigravity-gemini"] },
+      authoringProvider: { name: "claude-code", family: "claude" },
+    });
+
+    expect(problem).toContain("antigravity-claude");
+    expect(problem).toContain("claude");
+  });
+
+  it("names every offending role rather than only the first", () => {
+    const problem = independenceProblem({
+      providers: { p: claudeViaAggregator },
+      routes: { security: ["p"], implementation: ["p"] },
+      authoringProvider: { name: "claude-code", family: "claude" },
+    });
+
+    expect(problem).toContain("security");
+    expect(problem).toContain("implementation");
+  });
+
+  it("permits the violation when a reason is recorded, and not when it is blank", () => {
+    const routing = {
+      providers: { p: claudeViaAggregator },
+      routes: { security: ["p"], implementation: ["p"] },
+      authoringProvider: { name: "claude-code", family: "claude" },
+    };
+
+    expect(
+      independenceProblem({
+        ...routing,
+        authoringProviderOverrideReason: "single-provider host; availability preferred, 2026-09-20",
+      }),
+    ).toBeNull();
+    // A reason is the point, so an empty one is not an override.
+    expect(independenceProblem({ ...routing, authoringProviderOverrideReason: "" })).not.toBeNull();
+  });
+
+  it("compares families case-insensitively, so a label's casing cannot defeat the check", () => {
+    expect(
+      independenceProblem({
+        providers: { p: { family: "Claude" } },
+        routes: { security: ["p"] },
+        authoringProvider: { name: "claude-code", family: "claude" },
+      }),
+    ).not.toBeNull();
+  });
+});
+
+describe("per-provider credentials (FR-084)", () => {
+  const OAUTH: ModelCredential = { source: "oauth-profile", apiKey: null };
+  const KEYED: ModelCredential = { source: "environment", apiKey: "sk-test" };
+
+  it("is satisfied when every routed provider has one", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["subscription", "api"], implementation: ["subscription"] },
+        credentials: { subscription: OAUTH, api: KEYED },
+      }),
+    ).toEqual([]);
+  });
+
+  it("names a routed provider whose credential is absent", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["subscription", "api"] },
+        credentials: { subscription: OAUTH, api: null },
+      }),
+    ).toEqual(["api"]);
+  });
+
+  it("holds a last-resort entry to the same standard as a first one", () => {
+    // "A fallback that has never been verified is not a fallback, and the moment it is reached is
+    // the moment nothing else is left to try."
+    const missing = missingProviderCredentials({
+      routes: { security: ["subscription", "api", "spare"] },
+      credentials: { subscription: OAUTH, api: KEYED, spare: null },
+    });
+
+    expect(missing).toEqual(["spare"]);
+  });
+
+  it("treats an undeclared credential as absent rather than as permission to try", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["ghost"] },
+        credentials: {},
+      }),
+    ).toEqual(["ghost"]);
+  });
+
+  it("accepts an oauth-profile credential, which legitimately carries no key", () => {
+    // Only a source that promises a key and then supplies an empty one is a failure.
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["subscription"] },
+        credentials: { subscription: OAUTH },
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports a keyed source supplying an empty key as missing", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["api"] },
+        credentials: { api: { source: "environment", apiKey: "" } },
+      }),
+    ).toEqual(["api"]);
+  });
+
+  it("ignores a declared provider no route reaches — it cannot serve a request", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["subscription"] },
+        credentials: { subscription: OAUTH, unused: null },
+      }),
+    ).toEqual([]);
+  });
+
+  it("names each missing provider once, however many routes reach it", () => {
+    expect(
+      missingProviderCredentials({
+        routes: { security: ["api"], implementation: ["api"] },
+        credentials: { api: null },
+      }),
+    ).toEqual(["api"]);
+  });
+});
+
+describe("two providers on one account (R-029)", () => {
+  it("reports the pairing, because it is independence without availability", () => {
+    // Permitted and not a failure — but a route whose entries share a quota does not satisfy
+    // SC-001, and an operator who believes otherwise has bought nothing.
+    expect(
+      sharedAccountRoutes({
+        routes: { security: ["a", "b"], implementation: ["a"] },
+        providers: { a: { account: "one" }, b: { account: "one" } },
+      }),
+    ).toEqual([{ role: "security", account: "one", providers: ["a", "b"] }]);
+  });
+
+  it("says nothing when a route's providers draw on different accounts", () => {
+    expect(
+      sharedAccountRoutes({
+        routes: { security: ["a", "b"] },
+        providers: { a: { account: "one" }, b: { account: "two" } },
+      }),
+    ).toEqual([]);
   });
 });
