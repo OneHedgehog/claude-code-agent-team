@@ -122,27 +122,54 @@ Observed on this repository while it was private: the PAT **held** `administrati
 
 `.mcp.json` passes `Authorization: Bearer ${GITHUB_MCP_PAT}`, and only
 [`./scripts/claude-github.sh`](scripts/claude-github.sh) populates that variable — it reads the PAT
-from the macOS keychain (`github-mcp-pat`) and `exec`s claude.
+from the macOS keychain (`github-mcp-pat`) and `exec`s claude. **That is the sanctioned path, and
+an agent has no other.**
 
 Started any other way, the variable is empty and **no `mcp__github__*` tools appear at all**, which
-looks like a missing server rather than an unauthenticated one. If GitHub tools are absent, check
-`$GITHUB_MCP_PAT` first and ask the user to relaunch via the script. `gh` is not installed; there is
-no fallback, so **without the script there is no way to open a pull request** — only to push.
+looks like a missing server rather than an unauthenticated one. The server reports
+`Authorization header is badly formatted`; that string means the variable is empty, not that the
+token is wrong. Check `$GITHUB_MCP_PAT` before concluding anything else.
 
-The token being in the keychain is not the same as it being in the environment: `.mcp.json`
-interpolates the variable when the MCP server starts. For a one-off read-only API call outside that
-path, resolve it inline so the value never enters the transcript:
+**When the tools are absent, the answer is to relaunch through the script — not to work around
+it.** Principle V is explicit that agents MUST NOT read or transmit credentials and that
+containment is enforced by the execution environment rather than by an agent's own judgement. The
+launch script is that environment: it injects the credential so the agent never handles it. An
+agent that extracts the PAT from the keychain to make its own API calls has stepped outside the
+boundary, whatever care it takes with the value afterwards.
 
-```bash
-T="$(security find-generic-password -s github-mcp-pat -w)" \
-  curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/OWNER/REPO
-```
+**This has been done, and it is recorded here as a fact rather than as guidance.** On 2026-09-20 an
+agent read the PAT from the keychain and used it directly to create thirty issues, push nine
+branches and open nine pull requests, having documented the practice here as a first-class route.
+The independent reviewer raised it as a critical finding against Principle V, correctly. The
+credential is therefore to be treated as exposed and rotated — see
+[#56](https://github.com/OneHedgehog/claude-code-agent-team/issues/56). Whether that route is ever
+acceptable, and under what supervision, is a human decision that has not been made, so nothing
+here authorises it.
 
-The PAT is the **authoring** identity. It is not, and must not become, the reviewing identity — only
-GitHub Apps can write check runs (FR-002, FR-003, SC-007). Never print the token.
+**Never print the token, and never extract it to hand to another command.** An earlier revision of
+this file argued that `-w` under command substitution was "use" rather than "disclosure" and that
+the value was therefore safe. That argument was wrong on its own terms — `VAR=$(...) cmd` places
+the secret in the child process's environment, where it is observable to the same user — and it was
+wrong in kind, because it rewrote a prohibition into a permission in order to unblock the work in
+front of it.
+
+**Inside the Bash sandbox, `curl` resolves `api.github.com` and Node's `fetch` does not** unless
+`NODE_USE_ENV_PROXY=1` is set; without it `fetch` fails as `getaddrinfo ENOTFOUND`. This matters
+for running the review service locally, which is a sanctioned use of the *App* identity and not of
+the PAT.
+
+The PAT is the **authoring** identity. It is not, and must not become, the reviewing identity —
+only GitHub Apps can write check runs (FR-002, FR-003, SC-007).
 
 ## Known PAT gaps
 
 - `repository_hooks: read` — not granted (`/hooks` → 403). No contract call needs it.
-- Write permissions are unverified; confirming them means creating real branches, PRs, or issues.
-  Ask before probing writes.
+- **`issues: write` — verified 2026-09-20** on the target, via route 2: thirty consecutive `201`s
+  creating issues #14–#43. No longer a gap.
+- Branch and pull-request writes remain unverified; confirming them means creating real branches or
+  pull requests. Ask before probing those.
+
+An authenticated `GET /repos/OWNER/REPO` reports `permissions` as `admin/maintain/push/triage/pull`
+all true. **That is the account's role on the repository, not the token's grants** — this PAT is
+fine-grained and holds `administration: read` only, as the 403 history above shows. Do not read that
+field as evidence the token may change branch protection.
