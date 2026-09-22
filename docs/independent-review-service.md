@@ -151,6 +151,69 @@ convention this service maintains.
 
 ## Reaching the model
 
+### Provider, account, route
+
+A **provider** is a named way of reaching exactly one model family. It pins a model identifier per
+effort level, declares which family those identifiers resolve to, which funding **account** it
+draws on, what credential preflight must find, and how it satisfies every containment obligation.
+
+An **account** is the thing that gets billed or throttled, and therefore the thing a budget can
+bound. One account can serve several providers; when it does they draw on one metered resource,
+which is why budgets sit on the account while spend is attributed to the provider. *In this release
+accounts are declared, validated and reported but the ledger still enforces the flat `tokenBudget`
+and `reviewerTokenReserve`; the ledger moves onto per-account limits in the next change.*
+
+```jsonc
+{
+  "accounts": {
+    "anthropic-subscription": { "budget": 8000000, "reserve": 2000000 },
+    "anthropic-api": { "budget": 4000000, "reserve": 1000000 },
+  },
+  "providers": {
+    "claude-subscription": {
+      "models": { "high": "claude-opus-4-6" },
+      "family": "claude",
+      "transport": "agent-sdk",
+      "funding": "subscription",
+      "account": "anthropic-subscription",
+      "credential": { "source": "oauth-profile" },
+      "containment": {
+        "noTools": true,
+        "noInheritedSettings": true,
+        "noWorkingTreeAccess": true,
+        "allowlistedEnvironment": true,
+        "emptyWorkingDirectory": true,
+        "otherCredentialsNeutralised": true,
+      },
+    },
+    "claude-api": {
+      "models": { "high": "claude-opus-4-6" },
+      "family": "claude",
+      "transport": "api",
+      "funding": "metered",
+      "account": "anthropic-api",
+      "credential": { "source": "env", "name": "ANTHROPIC_API_KEY" },
+      "containment": {
+        /* …the same six obligations… */
+      },
+    },
+  },
+  "routes": {
+    "security": ["claude-subscription", "claude-api"],
+    "implementation": ["claude-subscription"],
+  },
+}
+```
+
+**What this configuration buys, and what it does not.** Both providers are the same model family
+on *different funding accounts*, so a session limit on the subscription no longer ends the round —
+the route advances to the metered account and the review completes. That is availability, and it
+is the failure that cost pull request #9 two of its nine rounds.
+
+It is **not** independence. A reviewer drawing on the same family that wrote the diff is
+independent in identity and not in judgement, and no arrangement of Claude-only providers changes
+that. Independence needs a second model family, which this service does not currently reach.
+
 ### Capacity advances the route; contract stops it dead
 
 Every failure carries a class, and the class decides everything:

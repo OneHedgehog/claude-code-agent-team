@@ -35,6 +35,91 @@ export type ModelEffort = "low" | "medium" | "high" | "xhigh" | "max";
  */
 export type ModelTransport = "api" | "agent-sdk";
 
+/** How a provider's family is reached. `cli` spawns a vendor binary and parses its JSON output. */
+export type ProviderTransport = ModelTransport | "cli";
+
+export type FundingSource = "metered" | "subscription";
+export type CredentialSource = "oauth-profile" | "env" | "keychain" | "file";
+
+export interface CredentialRequirement {
+  readonly source: CredentialSource;
+  readonly name?: string;
+}
+
+/**
+ * FR-083, stated per provider rather than assumed. Every flag is `true` in the schema — the point
+ * is not that an operator may choose, but that adding a provider is impossible without writing
+ * down how it satisfies each obligation. Reviewed content is untrusted data whichever vendor
+ * reads it (Principle V).
+ */
+export interface ContainmentDeclaration {
+  readonly noTools: true;
+  readonly noInheritedSettings: true;
+  readonly noWorkingTreeAccess: true;
+  readonly allowlistedEnvironment: true;
+  readonly emptyWorkingDirectory: true;
+  readonly otherCredentialsNeutralised: true;
+  readonly vendorSandbox?: boolean;
+  /** Non-egress host surfaces the child opens, declared rather than discovered (R-028). */
+  readonly hostSurfaces?: readonly string[];
+}
+
+/** A funding source that gets billed or throttled — the thing a budget can bound (FR-081). */
+export interface Account {
+  readonly name: string;
+  readonly budget: number;
+  readonly reserve: number;
+}
+
+/** A named way of reaching exactly one model family. */
+export interface Provider {
+  readonly name: string;
+  /** Model identifier per effort level. Effort is expressed here, never by a separate flag. */
+  readonly models: Readonly<Partial<Record<ModelEffort, string>>>;
+  readonly family: string;
+  readonly transport: ProviderTransport;
+  readonly funding: FundingSource;
+  readonly account: string;
+  readonly credential: CredentialRequirement;
+  readonly containment: ContainmentDeclaration;
+  /**
+   * True when this provider was synthesised by the FR-081 migration rather than declared.
+   *
+   * It carries no pinned model and no containment an operator wrote, because a pre-feature file
+   * declared neither, and demanding them would break SC-005 — the whole promise that such a file
+   * keeps working untouched. The declaration rules therefore run over the *declared* section and
+   * never see this object.
+   */
+  readonly synthesised: boolean;
+}
+
+/** An ordered, non-empty provider list per reviewer role. */
+export type Routes = Readonly<Record<RoleName, readonly string[]>>;
+
+/**
+ * The provider the authoring identity uses (FR-082).
+ *
+ * It carries its own family rather than naming an entry in `providers`, because the author is not
+ * a reviewer provider: it has no route, no credential this service resolves, and no containment
+ * this service enforces. The independence check needs exactly one thing from it — the family — so
+ * that is what it declares.
+ */
+export interface AuthoringProvider {
+  readonly name: string;
+  readonly family: string;
+}
+
+/**
+ * The per-attempt wall-clock bound in milliseconds (FR-086, superseding FR-066's value).
+ *
+ * Declared in the config layer rather than beside the transport that enforces it, because two
+ * places need it and one of them is the preflight arithmetic: a route long enough that its
+ * attempts could outlast `maxQueueWaitSeconds` must be refused before a review starts. Keeping
+ * the number in one place is what makes that check and the enforcement agree by construction
+ * rather than by a comment claiming they do.
+ */
+export const ATTEMPT_BOUND_MS = 5 * 60 * 1000;
+
 export interface EscalationChannel {
   readonly type: "github-issue";
   readonly assignee: string;
@@ -65,6 +150,34 @@ export interface OperatingSettings {
   readonly maxConcurrentReviews: number;
   readonly modelEffort: ModelEffort;
   readonly modelTransport: ModelTransport;
+
+  /**
+   * Funding accounts, keyed by name (FR-081).
+   *
+   * Declared or synthesised, this is always populated: a legacy file's single budget becomes one
+   * account so that everything downstream sees one shape. The *ledger* still enforces the flat
+   * `tokenBudget`/`reviewerTokenReserve` in this release and moves onto these limits in the next
+   * pull request — until then these are validated and reported, not yet the budget authority.
+   */
+  readonly accounts: Readonly<Record<string, Account>>;
+  /** Providers, keyed by name. Always populated — synthesised from `modelTransport` if absent. */
+  readonly providers: Readonly<Record<string, Provider>>;
+  /** Each required role's ordered provider list. Always populated, single-entry after migration. */
+  readonly routes: Routes;
+  /**
+   * The provider the authoring identity uses (FR-082), when the operator has named one.
+   *
+   * `undefined` is not a loophole, it is the absence of a subject: FR-082 requires the authoring
+   * provider be named *explicitly* precisely because an inferred one cannot be checked at
+   * preflight. With nothing declared the independence rule has nothing to compare against and
+   * does not run — which is also what keeps a pre-feature file working (SC-005), since such a
+   * file's one provider would otherwise be both author and reviewer and could never pass.
+   */
+  readonly authoringProvider?: AuthoringProvider;
+  /** Presence is the FR-082 override; there is no boolean, because a reason is the point. */
+  readonly authoringProviderOverrideReason?: string;
+  /** True when routes and providers were migrated from `modelTransport` rather than declared. */
+  readonly migratedFromModelTransport: boolean;
 }
 
 export interface LoadedSettings {
@@ -189,6 +302,111 @@ function invariantProblems(
   return problems;
 }
 
+/** The account and provider names the migration synthesises. Stable, so records stay comparable. */
+export const MIGRATED_ACCOUNT_NAME = "default";
+
+/**
+ * Reads the declared routing shape, or synthesises it from `modelTransport` (FR-076, FR-081,
+ * SC-005).
+ *
+ * A file predating this feature describes one transport and one budget. That *is* a
+ * single-provider, single-account configuration with a single-entry route per role — it simply
+ * spells it differently — so it is read as one rather than rejected or defaulted. No operator
+ * action, and the run reports the same effective behaviour it reported before.
+ *
+ * The synthesised provider deliberately carries no pinned model: a legacy file pinned none, the
+ * transport chose, and inventing one here would change behaviour under the banner of preserving
+ * it. `synthesised` marks it so nothing later mistakes the gap for an operator's omission.
+ */
+function resolveRouting(
+  section: Record<string, unknown>,
+  requiredRoles: readonly RoleName[],
+  transport: ModelTransport,
+  tokenBudget: number,
+  reviewerTokenReserve: number,
+): {
+  accounts: Record<string, Account>;
+  providers: Record<string, Provider>;
+  routes: Routes;
+  migrated: boolean;
+} {
+  const declaredProviders = section["providers"] as Record<string, unknown> | undefined;
+
+  if (declaredProviders === undefined) {
+    const account: Account = {
+      name: MIGRATED_ACCOUNT_NAME,
+      budget: tokenBudget,
+      reserve: reviewerTokenReserve,
+    };
+    const provider: Provider = {
+      name: transport,
+      models: {},
+      family: transport,
+      transport,
+      funding: transport === "agent-sdk" ? "subscription" : "metered",
+      account: MIGRATED_ACCOUNT_NAME,
+      credential: { source: transport === "agent-sdk" ? "oauth-profile" : "env" },
+      containment: {
+        noTools: true,
+        noInheritedSettings: true,
+        noWorkingTreeAccess: true,
+        allowlistedEnvironment: true,
+        emptyWorkingDirectory: true,
+        otherCredentialsNeutralised: true,
+      },
+      synthesised: true,
+    };
+    const routes = Object.fromEntries(
+      requiredRoles.map((role) => [role, [transport]]),
+    ) as unknown as Routes;
+
+    return {
+      accounts: { [MIGRATED_ACCOUNT_NAME]: account },
+      providers: { [transport]: provider },
+      routes,
+      migrated: true,
+    };
+  }
+
+  const rawAccounts = (section["accounts"] ?? {}) as Record<
+    string,
+    { budget: number; reserve: number }
+  >;
+  const accounts = Object.fromEntries(
+    Object.entries(rawAccounts).map(([name, a]) => [
+      name,
+      { name, budget: a.budget, reserve: a.reserve },
+    ]),
+  );
+
+  const providers = Object.fromEntries(
+    Object.entries(declaredProviders).map(([name, raw]) => {
+      const p = raw as Omit<Provider, "name" | "synthesised">;
+      return [
+        name,
+        {
+          name,
+          models: p.models,
+          family: p.family,
+          transport: p.transport,
+          funding: p.funding,
+          account: p.account,
+          credential: p.credential,
+          containment: p.containment,
+          synthesised: false,
+        } satisfies Provider,
+      ];
+    }),
+  );
+
+  const declaredRoutes = (section["routes"] ?? {}) as Partial<Record<RoleName, string[]>>;
+  const routes = Object.fromEntries(
+    requiredRoles.map((role) => [role, declaredRoutes[role] ?? []]),
+  ) as unknown as Routes;
+
+  return { accounts, providers, routes, migrated: false };
+}
+
 /**
  * Validates a parsed settings file and returns this service's own section, with optional settings
  * filled from their documented defaults and reported as effective.
@@ -213,6 +431,15 @@ export function validateSettings(raw: unknown): LoadedSettings {
   const modelTransport = (section["modelTransport"] ?? DEFAULTS.modelTransport) as ModelTransport;
   const label = (channel["label"] ?? DEFAULTS.escalationLabel) as string;
 
+  const requiredRoles = section["requiredReviewerRoles"] as readonly RoleName[];
+  const routing = resolveRouting(
+    section,
+    requiredRoles,
+    modelTransport,
+    section["tokenBudget"] as number,
+    section["reviewerTokenReserve"] as number,
+  );
+
   const settings: OperatingSettings = {
     requiredReviewerRoles: section["requiredReviewerRoles"] as readonly RoleName[],
     blockingSeverityThreshold: section["blockingSeverityThreshold"] as Severity,
@@ -235,11 +462,27 @@ export function validateSettings(raw: unknown): LoadedSettings {
     },
     modelEffort,
     modelTransport,
+    accounts: routing.accounts,
+    providers: routing.providers,
+    routes: routing.routes,
+    ...(section["authoringProvider"] === undefined
+      ? {}
+      : { authoringProvider: section["authoringProvider"] as AuthoringProvider }),
+    ...(section["authoringProviderOverrideReason"] === undefined
+      ? {}
+      : {
+          authoringProviderOverrideReason: section["authoringProviderOverrideReason"] as string,
+        }),
+    migratedFromModelTransport: routing.migrated,
   };
 
   return {
     settings,
     host: { maxConcurrentAgents: host["maxConcurrentAgents"] as number },
+    // Only FR-054's optional settings and the values actually applied. Routes are resolved rather
+    // than defaulted, so they are reported by the run record's `settings.resolved` event instead
+    // of here — FR-076's reporting obligation, discharged where resolution is visible rather than
+    // by widening what "optional setting" means.
     effectiveOptionalSettings: {
       modelEffort,
       modelTransport,

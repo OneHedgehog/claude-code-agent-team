@@ -173,6 +173,152 @@
           "description": "OPTIONAL (FR-054) — depth/cost trade-off passed to the model boundary. Absent, the documented default below is applied rather than stopping the run, and the effective value is reported with the run so that no behavior depends on a value nobody can see.",
           "enum": ["low", "medium", "high", "xhigh", "max"],
           "default": "high"
+        },
+
+        "accounts": {
+          "description": "OPTIONAL (FR-081) — funding sources, keyed by name. An account is the thing that gets billed or throttled, and therefore the thing a budget can bound: one account may serve several providers, and when it does they draw on one metered resource. Absent, the migration synthesises a single account from `tokenBudget`/`reviewerTokenReserve` (SC-005). NOTE: in this release accounts are declared and validated but the ledger still enforces the flat `tokenBudget`/`reviewerTokenReserve`; the ledger moves onto these limits in the following pull request, at which point the flat pair is superseded.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["budget", "reserve"],
+            "properties": {
+              "budget": { "type": "integer", "minimum": 1 },
+              "reserve": {
+                "description": "`review` remains the only actor permitted to draw into it. Must be less than this account's budget — enforced in code, like every other cross-field invariant here.",
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+
+        "providers": {
+          "description": "OPTIONAL (FR-076, FR-077) — named ways of reaching one model family each, keyed by name. Absent, the migration synthesises a single provider from `modelTransport`. MUST NOT be declared alongside `modelTransport`: two descriptions of how a model is reached is one more than can be true.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/provider" }
+        },
+
+        "routes": {
+          "description": "OPTIONAL (FR-076) — the ordered provider list each reviewer role is asked in, keyed by role. Advanced only on a capacity failure (FR-078), exhausted rather than restarted (FR-080). Absent, the migration gives every required role a single-entry route.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "security": { "$ref": "#/$defs/route" },
+            "implementation": { "$ref": "#/$defs/route" }
+          }
+        },
+
+        "authoringProvider": {
+          "description": "OPTIONAL (FR-082) — the provider the authoring identity uses. Named explicitly rather than inferred: an independence rule that infers who the author was cannot be validated at preflight, and one that is not validated at preflight is discovered after the spend. It carries its own `family` rather than referencing an entry in `providers`, because the author is not a reviewer provider — it has no route, no credential this service resolves and no containment this service enforces, and demanding a full provider declaration for something never invoked would be a fiction. No required reviewer role may run on a provider whose `family` matches this one, unless `authoringProviderOverrideReason` is present.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "family"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "family": { "type": "string", "minLength": 1 }
+          }
+        },
+
+        "authoringProviderOverrideReason": {
+          "description": "OPTIONAL (FR-082) — a recorded, version-controlled reason permitting a required reviewer role to run on the authoring provider's model family. Its presence is the override; there is no boolean, because an override without a stated reason is the thing Principle VI forbids.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "route": {
+      "title": "One reviewer role's ordered provider list",
+      "description": "Non-empty, no provider twice, every name declared in `providers`, and short enough that its attempts at the FR-086 bound cannot outlast `maxQueueWaitSeconds` — all enforced in code after schema validation.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "provider": {
+      "title": "One named way of reaching one model family",
+      "description": "Distinct from a *transport*, which is how the family is reached. FR-083: a provider MUST NOT be addable without stating how it satisfies each containment obligation, because reviewed content is untrusted data whichever vendor reads it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models", "family", "transport", "funding", "account", "credential", "containment"],
+      "properties": {
+        "models": {
+          "description": "The exact model identifier per effort level. Required and never defaulted (R-021): a vendor default can change between releases, and a family nobody pinned is a family the FR-082 check never saw. Effort is expressed HERE rather than by a separate flag, so a provider serves only the effort levels it pins a model for; a configured `modelEffort` with no entry is a preflight failure, not a silent downgrade (FR-060).",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "low": { "type": "string", "minLength": 1 },
+            "medium": { "type": "string", "minLength": 1 },
+            "high": { "type": "string", "minLength": 1 },
+            "xhigh": { "type": "string", "minLength": 1 },
+            "max": { "type": "string", "minLength": 1 }
+          }
+        },
+        "family": {
+          "description": "The model family every entry in `models` resolves to. The FR-082 independence check compares families, never vendor labels — an aggregator can serve the authoring family under another vendor's name (R-021).",
+          "type": "string",
+          "minLength": 1
+        },
+        "transport": {
+          "description": "How the family is reached. `cli` spawns a vendor binary and parses its JSON output, discharging containment at the spawn rather than in the dependency tree.",
+          "enum": ["api", "agent-sdk", "cli"]
+        },
+        "funding": {
+          "description": "Recorded so Principle IV's no-new-metered-spend assumption is checkable rather than asserted.",
+          "enum": ["metered", "subscription"]
+        },
+        "account": {
+          "description": "Which declared account this provider draws on. Two providers sharing one account are independent in judgement and NOT in capacity (R-029); such a pair does not satisfy SC-001.",
+          "type": "string",
+          "minLength": 1
+        },
+        "credential": {
+          "description": "What preflight must find before any spend (FR-084). An `oauth-profile` legitimately carries no key; only a source that promises a key and then supplies an empty one is rejected.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source"],
+          "properties": {
+            "source": { "enum": ["oauth-profile", "env", "keychain", "file"] },
+            "name": {
+              "description": "The variable, keychain item or path the credential is read from, where the source needs one.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "containment": {
+          "description": "FR-083. Every obligation must be stated; a declaration missing any is a schema error, not a warning. These are assertions the provider implementation is required to honour at the call site, and preflight checks that the operator declared them.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "noTools",
+            "noInheritedSettings",
+            "noWorkingTreeAccess",
+            "allowlistedEnvironment",
+            "emptyWorkingDirectory",
+            "otherCredentialsNeutralised"
+          ],
+          "properties": {
+            "noTools": { "const": true },
+            "noInheritedSettings": { "const": true },
+            "noWorkingTreeAccess": { "const": true },
+            "allowlistedEnvironment": { "const": true },
+            "emptyWorkingDirectory": { "const": true },
+            "otherCredentialsNeutralised": { "const": true },
+            "vendorSandbox": {
+              "description": "OPTIONAL — a restriction the vendor itself enforces, where one exists. Structural rather than a matter of our own compliance (Principle V), so it is recorded when available.",
+              "type": "boolean"
+            },
+            "hostSurfaces": {
+              "description": "OPTIONAL — host surfaces the child opens that are not egress, declared rather than discovered (R-028): a loopback listener, local state written. Naming them is the obligation; they are not prohibited.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
         }
       }
     }
